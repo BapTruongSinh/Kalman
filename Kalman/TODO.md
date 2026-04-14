@@ -19,7 +19,6 @@ No task currently in progress.
 
 ## Backlog
 
-- [ ] #010 - Add live sensor ingestion path [area: backend] -> [.tasks/010-live-sensor-ingestion-path.md](.tasks/010-live-sensor-ingestion-path.md)
 - [ ] #012 - Document v1 methodology and demo workflow [area: docs] -> [.tasks/012-v1-methodology-demo-workflow.md](.tasks/012-v1-methodology-demo-workflow.md)
 - [ ] #013 - Synthesize AMPC state, cost, and safety constraints [area: docs] -> [.tasks/013-synthesize-ampc-state-cost-safety-constraints.md](.tasks/013-synthesize-ampc-state-cost-safety-constraints.md)
 
@@ -27,6 +26,7 @@ No task currently in progress.
 
 ## Completed
 
+- [x] #010 - Add live sensor ingestion path [area: backend] -> [.tasks/010-live-sensor-ingestion-path.md](.tasks/010-live-sensor-ingestion-path.md)
 - [x] #009 - Build raw, predicted, and filtered dashboard view -> [.tasks/009-raw-predicted-filtered-dashboard.md](.tasks/009-raw-predicted-filtered-dashboard.md)
 - [x] #008 - Build evaluation metrics and report export -> [.tasks/008-evaluation-metrics-report-export.md](.tasks/008-evaluation-metrics-report-export.md)
 - [x] #007 - Store run outputs and pipeline logs -> [.tasks/007-store-run-outputs-pipeline-logs.md](.tasks/007-store-run-outputs-pipeline-logs.md)

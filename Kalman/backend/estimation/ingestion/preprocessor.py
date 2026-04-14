@@ -270,3 +270,34 @@ def _make_processed(
         mist=effective.get("mist"),
         fan=effective.get("fan"),
     )
+
+
+def preprocess_single(
+    record: RawRecord,
+    validation: ValidationResult,
+) -> ProcessedRecord:
+    """Build a :class:`ProcessedRecord` for one record using skip policy.
+
+    This is the correct policy for live sensor ingestion: if a reading is
+    invalid there is no historical context to interpolate from, so all
+    effective field values are set to ``None`` and the Kalman cycle skips
+    the measurement-update step.
+
+    Parameters
+    ----------
+    record:
+        Raw sensor record (single sample from a device).
+    validation:
+        Result of calling :func:`~validator.validate_record` on *record*.
+
+    Returns
+    -------
+    ProcessedRecord
+        ``preprocess_status="valid"`` when the reading passes validation;
+        ``preprocess_status="skipped"`` with all-``None`` effective values otherwise.
+    """
+    if validation.is_valid:
+        effective: dict[str, float | None] = {f: getattr(record, f) for f in _FIELDS}
+        return _make_processed(record, validation, "valid", effective)
+    effective = {f: None for f in _FIELDS}
+    return _make_processed(record, validation, "skipped", effective)

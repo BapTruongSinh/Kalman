@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     "django.contrib.auth",
     "corsheaders",
     "rest_framework",
+    "rest_framework.authtoken",
     "estimation",
 ]
 

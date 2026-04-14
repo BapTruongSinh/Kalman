@@ -8,13 +8,88 @@ Read by: @frontend-developer and @qa-engineer
 # API Reference
 
 > **Base URL (dev)**: `http://127.0.0.1:8000/api`
-> **Authentication**: None (local dev); production endpoints must be protected
+> **Authentication**: Dashboard endpoints are public (local dev). The live ingestion endpoint at `/api/ingest/samples/` requires a **DRF Token** (`Authorization: Token <token>`).
 > **Content-Type**: `application/json`
 > **Last updated**: 2026-04-14
 
 ---
 
-## Live Endpoints (Task #009)
+## Live Ingestion Endpoint (Task #010)
+
+### `POST /api/ingest/samples/`
+
+Accept one live sensor reading from a device and run a single Adaptive Kalman step.
+
+**Authentication**: Required — `Authorization: Token <token>`.
+Provision a token once with:
+```
+python manage.py drf_create_token <username>
+```
+
+**Request body**
+
+```json
+{
+  "run_id": 7,
+  "timestamp": "2026-04-14T12:00:00Z",
+  "soil_moisture": 45.3,
+  "temperature": 22.1,
+  "humidity": 65.0,
+  "light": 120.0,
+  "drip": 0.0,
+  "mist": 0.0,
+  "fan": 1.0
+}
+```
+
+| Field | Type | Required | Notes |
+|-------|------|----------|-------|
+| `run_id` | int | Yes | ID of a `live` ExperimentRun in `running` status |
+| `timestamp` | ISO-8601 UTC | Yes | Timestamp from the sensor |
+| `soil_moisture` | float \| null | No | Primary Kalman channel (%) |
+| `temperature` | float \| null | No | Stored for traceability |
+| `humidity` | float \| null | No | Stored for traceability |
+| `light` | float \| null | No | Stored for traceability |
+| `drip` | float \| null | No | Actuator flag |
+| `mist` | float \| null | No | Actuator flag |
+| `fan` | float \| null | No | Actuator flag |
+
+**Response `201 Created`**
+
+```json
+{
+  "cycle_index": 0,
+  "preprocess_status": "valid",
+  "cycle_status": "ok",
+  "adaptive_status": "R_updated",
+  "kf_x_posterior": 45.1,
+  "kf_innovation": 0.2
+}
+```
+
+| Field | Type | Notes |
+|-------|------|-------|
+| `cycle_index` | int | Zero-based monotonic index within the run |
+| `preprocess_status` | string | `valid` or `skipped` |
+| `cycle_status` | string | `ok` / `skipped_no_measurement` / `error` |
+| `adaptive_status` | string | `R_updated` / `R_skipped` / `skipped` |
+| `kf_x_posterior` | float \| null | Filtered soil-moisture estimate |
+| `kf_innovation` | float \| null | Measurement residual; null when no update |
+
+**Error responses**
+
+| Status | Meaning |
+|--------|---------|
+| `400 Bad Request` | Payload validation failed (missing/invalid fields) |
+| `401 Unauthorized` | Missing or invalid auth token |
+| `404 Not Found` | `run_id` not found, or run is not of `live` type |
+| `409 Conflict` | Run is not in `running` status (pending / completed / failed) |
+
+**Reconnect / gap handling**: If the most recent persisted cycle has null Kalman fields (error recovery), the state resets from the `ExperimentConfig` defaults so the pipeline resumes cleanly.
+
+---
+
+## Dashboard Endpoints (Task #009)
 
 ### `GET /api/runs/`
 

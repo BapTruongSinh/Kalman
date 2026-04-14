@@ -10,6 +10,7 @@ Public API
 - :func:`validate_batch` — validate a record sequence (with repeat detection)
 - :func:`validate_record` — validate a single record
 - :func:`apply_preprocessing` — apply keep_last / interpolate / skip policy
+- :func:`preprocess_single` — skip-policy preprocessing for one live sample
 - :class:`RawRecord` — typed raw data record
 - :class:`DatasetSplit` — train/val/test container
 - :class:`ValidationResult` — per-record validation outcome
@@ -27,6 +28,7 @@ from .preprocessor import (
     VALID_POLICIES,
     ProcessedRecord,
     apply_preprocessing,
+    preprocess_single,
 )
 from .validator import ValidationConfig, ValidationResult, validate_batch, validate_record
 
@@ -43,6 +45,7 @@ __all__ = [
     "ValidationConfig",
     # preprocessor
     "apply_preprocessing",
+    "preprocess_single",
     "ProcessedRecord",
     "KEEP_LAST",
     "INTERPOLATE",
