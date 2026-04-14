@@ -48,7 +48,7 @@ Expected fields, based on `../ARX/greenhouse_data.csv`:
 | Field | Required | Notes |
 |-------|----------|-------|
 | `sample` | Yes | Validated sample payload |
-| `status` | Yes | `valid`, `corrected`, `interpolated`, `skipped`, or `invalid` |
+| `status` | Yes | `valid`, `kept_last`, `interpolated`, or `skipped` (preprocess_status) |
 | `issues` | Yes | Validation or data-quality issues |
 
 ### Prediction Result
