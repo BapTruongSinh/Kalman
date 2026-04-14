@@ -132,6 +132,16 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
     SliceMetrics
         Immutable dataclass with every computed metric.  Fields are ``None``
         when there is insufficient data (e.g. no ARX predictions available).
+
+    Notes
+    -----
+    * All scalar aggregations (latency, innovation, R, P) use
+      :func:`_finite_values`, which discards ``None``, ``NaN``, and ``Inf``
+      before building numpy arrays.
+    * Variance reduction is computed on **paired** rows — only rows where
+      *both* ``raw_soil_moisture`` and ``kf_x_posterior`` are finite are
+      included.  This guarantees the two ``np.diff`` sequences share the same
+      sample index, so the ratio is meaningful for the ADR-003 acceptance gate.
     """
     if not rows:
         return SliceMetrics()
@@ -149,9 +159,8 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
     n_adaptive_skipped = sum(1 for r in rows if r.get("adaptive_status") == "skipped")
 
     # ── Latency ───────────────────────────────────────────────────────────────
-    latencies = [r["latency_ms"] for r in rows if r.get("latency_ms") is not None]
-    if latencies:
-        lat_arr = np.array(latencies, dtype=float)
+    lat_arr = _finite_values(rows, "latency_ms")
+    if len(lat_arr) > 0:
         latency_mean_ms = float(np.mean(lat_arr))
         latency_p95_ms = float(np.percentile(lat_arr, 95))
     else:
@@ -175,14 +184,10 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
         rmse_filtered = mae_filtered = None
 
     # ── Variance reduction ────────────────────────────────────────────────────
-    raw_vals = np.array(
-        [r["raw_soil_moisture"] for r in rows if r.get("raw_soil_moisture") is not None],
-        dtype=float,
-    )
-    filt_vals = np.array(
-        [r["kf_x_posterior"] for r in rows if r.get("kf_x_posterior") is not None],
-        dtype=float,
-    )
+    # Use _paired_values so raw_vals[i] and filt_vals[i] always correspond to
+    # the SAME row.  Non-finite values in either column cause the row to be
+    # dropped from both arrays, keeping the diff sequences aligned.
+    raw_vals, filt_vals = _paired_values(rows, "raw_soil_moisture", "kf_x_posterior")
 
     var_diff_raw = float(np.var(np.diff(raw_vals))) if len(raw_vals) >= 2 else None
     var_diff_filtered = float(np.var(np.diff(filt_vals))) if len(filt_vals) >= 2 else None
@@ -205,10 +210,7 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
     )
 
     # ── Innovation diagnostics ────────────────────────────────────────────────
-    innovations = np.array(
-        [r["kf_innovation"] for r in rows if r.get("kf_innovation") is not None],
-        dtype=float,
-    )
+    innovations = _finite_values(rows, "kf_innovation")
     if len(innovations) > 0:
         innovation_mean = float(np.mean(innovations))
         innovation_std = float(np.std(innovations))
@@ -217,10 +219,7 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
         innovation_mean = innovation_std = innovation_max_abs = None
 
     # ── Adaptive R diagnostics ────────────────────────────────────────────────
-    r_vals = np.array(
-        [r["kf_R"] for r in rows if r.get("kf_R") is not None],
-        dtype=float,
-    )
+    r_vals = _finite_values(rows, "kf_R")
     if len(r_vals) > 0:
         R_mean = float(np.mean(r_vals))
         R_min_observed = float(np.min(r_vals))
@@ -229,10 +228,7 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
         R_mean = R_min_observed = R_max_observed = None
 
     # ── Posterior covariance ──────────────────────────────────────────────────
-    p_vals = np.array(
-        [r["kf_P_posterior"] for r in rows if r.get("kf_P_posterior") is not None],
-        dtype=float,
-    )
+    p_vals = _finite_values(rows, "kf_P_posterior")
     if len(p_vals) > 0:
         P_mean = float(np.mean(p_vals))
         P_max = float(np.max(p_vals))
@@ -288,24 +284,50 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
 # ── Private helpers ────────────────────────────────────────────────────────────
 
 
+def _finite_values(rows: Sequence[dict], field: str) -> np.ndarray:
+    """Return a 1-D float array containing only finite values for *field*.
+
+    Rows where the field is ``None``, ``NaN``, or ``Inf`` are silently dropped.
+    Non-numeric values that cannot be cast to ``float`` are also dropped.
+    """
+    out: list[float] = []
+    for r in rows:
+        v = r.get(field)
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(f):
+            out.append(f)
+    return np.array(out, dtype=float)
+
+
 def _paired_values(
-    rows: list[dict],
+    rows: Sequence[dict],
     ref_key: str,
     pred_key: str,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return parallel arrays for pairs where both values are non-None finite floats."""
+    """Return parallel arrays for pairs where BOTH values are non-None finite floats.
+
+    Rows where either column is ``None``, ``NaN``, ``Inf``, or non-numeric are
+    dropped from *both* output arrays.  The two returned arrays are therefore
+    guaranteed to be the same length and to share the same row indices.
+    """
     refs, preds = [], []
     for r in rows:
         ref = r.get(ref_key)
         pred = r.get(pred_key)
-        if ref is not None and pred is not None:
-            try:
-                f_ref, f_pred = float(ref), float(pred)
-            except (TypeError, ValueError):
-                continue
-            if np.isfinite(f_ref) and np.isfinite(f_pred):
-                refs.append(f_ref)
-                preds.append(f_pred)
+        if ref is None or pred is None:
+            continue
+        try:
+            f_ref, f_pred = float(ref), float(pred)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(f_ref) and np.isfinite(f_pred):
+            refs.append(f_ref)
+            preds.append(f_pred)
     return np.array(refs, dtype=float), np.array(preds, dtype=float)
 
 

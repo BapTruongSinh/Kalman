@@ -386,6 +386,225 @@ class TestComputeMetricsEdgeCases:
         assert m.variance_reduction is None
 
 
+# ── TestVariancePairing ────────────────────────────────────────────────────────
+
+
+class TestVariancePairing:
+    """Variance reduction must be computed on paired (same-row) samples.
+
+    If some rows have raw_soil_moisture but no kf_x_posterior (or vice-versa),
+    those rows must be dropped from *both* arrays before computing np.diff so
+    the two diff sequences share the same index set.
+    """
+
+    def test_mismatched_rows_excluded_from_both_arrays(self):
+        # Row 0: has raw but no posterior  → must be excluded from both
+        # Rows 1-3: fully paired
+        rows = [
+            _row(raw_sm=50.0, kf_post=None),   # excluded
+            _row(raw_sm=51.0, kf_post=51.5),
+            _row(raw_sm=52.0, kf_post=52.4),
+            _row(raw_sm=53.0, kf_post=53.3),
+        ]
+        m = compute_metrics(rows)
+        # Both variance values must be finite (computed from the 3 paired rows)
+        assert m.var_diff_raw is not None and math.isfinite(m.var_diff_raw)
+        assert m.var_diff_filtered is not None and math.isfinite(m.var_diff_filtered)
+
+    def test_mismatched_posterior_excluded_from_both_arrays(self):
+        # Row 2: has posterior but no raw  → must be excluded from both
+        rows = [
+            _row(raw_sm=51.0, kf_post=51.5),
+            _row(raw_sm=52.0, kf_post=52.4),
+            _row(raw_sm=None, kf_post=53.0),   # excluded
+            _row(raw_sm=54.0, kf_post=53.9),
+        ]
+        m = compute_metrics(rows)
+        assert m.var_diff_raw is not None and math.isfinite(m.var_diff_raw)
+        assert m.var_diff_filtered is not None and math.isfinite(m.var_diff_filtered)
+
+    def test_nan_in_raw_excludes_paired_posterior(self):
+        rows = [
+            _row(raw_sm=float("nan"), kf_post=51.5),  # NaN raw → both excluded
+            _row(raw_sm=52.0, kf_post=52.4),
+            _row(raw_sm=53.0, kf_post=53.3),
+            _row(raw_sm=54.0, kf_post=53.9),
+        ]
+        m = compute_metrics(rows)
+        # Only 3 valid pairs → variance computable
+        assert m.var_diff_raw is not None and math.isfinite(m.var_diff_raw)
+
+    def test_inf_in_posterior_excludes_paired_raw(self):
+        rows = [
+            _row(raw_sm=51.0, kf_post=float("inf")),  # Inf post → both excluded
+            _row(raw_sm=52.0, kf_post=52.4),
+            _row(raw_sm=53.0, kf_post=53.3),
+            _row(raw_sm=54.0, kf_post=53.9),
+        ]
+        m = compute_metrics(rows)
+        assert m.var_diff_filtered is not None and math.isfinite(m.var_diff_filtered)
+
+    def test_too_few_paired_rows_returns_none(self):
+        # Only 1 valid pair → np.diff produces empty array → None
+        rows = [
+            _row(raw_sm=51.0, kf_post=None),
+            _row(raw_sm=52.0, kf_post=52.4),  # only 1 valid pair
+            _row(raw_sm=None, kf_post=53.0),
+        ]
+        m = compute_metrics(rows)
+        assert m.var_diff_raw is None
+        assert m.var_diff_filtered is None
+        assert m.variance_reduction is None
+
+
+# ── TestNonFiniteFiltering ─────────────────────────────────────────────────────
+
+
+class TestNonFiniteFiltering:
+    """NaN / Inf values in single-field metrics must produce None, not NaN/Inf."""
+
+    def test_latency_nan_ignored(self):
+        rows = [
+            _row(latency=float("nan")),
+            _row(latency=float("nan")),
+        ]
+        m = compute_metrics(rows)
+        assert m.latency_mean_ms is None
+        assert m.latency_p95_ms is None
+
+    def test_latency_inf_ignored(self):
+        rows = [_row(latency=float("inf")), _row(latency=2.0)]
+        m = compute_metrics(rows)
+        # Only the 2.0 row contributes → mean = 2.0, p95 = 2.0
+        assert m.latency_mean_ms == pytest.approx(2.0)
+        assert m.latency_p95_ms is not None and math.isfinite(m.latency_p95_ms)
+
+    def test_mixed_valid_and_nan_latency(self):
+        rows = [_row(latency=float("nan")), _row(latency=3.0), _row(latency=5.0)]
+        m = compute_metrics(rows)
+        assert m.latency_mean_ms == pytest.approx(4.0)
+        assert m.latency_mean_ms is not None and math.isfinite(m.latency_mean_ms)
+
+    def test_innovation_nan_ignored(self):
+        rows = [_row(innovation=float("nan")), _row(innovation=float("nan"))]
+        m = compute_metrics(rows)
+        assert m.innovation_mean is None
+        assert m.innovation_std is None
+        assert m.innovation_max_abs is None
+
+    def test_innovation_inf_gives_finite_result_for_valid_rows(self):
+        rows = [_row(innovation=float("inf")), _row(innovation=0.5)]
+        m = compute_metrics(rows)
+        assert m.innovation_mean == pytest.approx(0.5)
+        assert math.isfinite(m.innovation_mean)
+
+    def test_R_nan_ignored(self):
+        rows = [_row(kf_R=float("nan")), _row(kf_R=float("nan"))]
+        m = compute_metrics(rows)
+        assert m.R_mean is None
+        assert m.R_min_observed is None
+        assert m.R_max_observed is None
+
+    def test_R_inf_excluded(self):
+        rows = [_row(kf_R=float("inf")), _row(kf_R=2.0)]
+        m = compute_metrics(rows)
+        assert m.R_mean == pytest.approx(2.0)
+        assert math.isfinite(m.R_mean)
+
+    def test_P_nan_ignored(self):
+        rows = [_row(kf_P=float("nan")), _row(kf_P=float("nan"))]
+        m = compute_metrics(rows)
+        assert m.P_mean is None
+        assert m.P_max is None
+
+    def test_all_fields_finite_or_none_when_input_has_nan(self):
+        """No metric field on the returned SliceMetrics may be NaN or Inf."""
+        rows = [
+            _row(
+                raw_sm=float("nan"),
+                arx=float("inf"),
+                kf_post=float("nan"),
+                innovation=float("nan"),
+                kf_R=float("inf"),
+                kf_P=float("nan"),
+                latency=float("nan"),
+            ),
+            _row(raw_sm=52.0, kf_post=52.4),
+        ]
+        m = compute_metrics(rows)
+        for field_name in SliceMetrics.__dataclass_fields__:
+            val = getattr(m, field_name)
+            if isinstance(val, float):
+                assert math.isfinite(val), (
+                    f"Field {field_name!r} is non-finite: {val!r}"
+                )
+
+
+# ── TestMatplotlibLazyImport ───────────────────────────────────────────────────
+
+
+class TestMatplotlibLazyImport:
+    """Loading reporter module must not trigger matplotlib imports.
+
+    evaluate_slice / build_text_report must work cleanly even when matplotlib
+    is broken (or absent), because matplotlib is only loaded inside export_plots.
+    """
+
+    def test_evaluate_slice_works_without_matplotlib(self, monkeypatch):
+        """Importing reporter and calling evaluate_slice must not touch matplotlib."""
+        import sys
+
+        # Temporarily hide matplotlib from sys.modules
+        original = sys.modules.pop("matplotlib", None)
+        original_plt = sys.modules.pop("matplotlib.pyplot", None)
+        original_dates = sys.modules.pop("matplotlib.dates", None)
+
+        # Force-reload reporter with matplotlib absent
+        import importlib
+        import estimation.evaluation.reporter as reporter_mod
+        importlib.reload(reporter_mod)
+
+        try:
+            # The reporter module must have loaded without error
+            assert hasattr(reporter_mod, "evaluate_slice")
+        finally:
+            # Restore sys.modules
+            if original is not None:
+                sys.modules["matplotlib"] = original
+            if original_plt is not None:
+                sys.modules["matplotlib.pyplot"] = original_plt
+            if original_dates is not None:
+                sys.modules["matplotlib.dates"] = original_dates
+            importlib.reload(reporter_mod)
+
+    def test_export_plots_returns_empty_list_when_matplotlib_missing(
+        self, monkeypatch
+    ):
+        """export_plots should return [] gracefully if matplotlib cannot be imported."""
+        import sys
+        import importlib
+        import estimation.evaluation.reporter as reporter_mod
+
+        # Make the lazy import fail inside export_plots by patching builtins.__import__
+        original_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+
+        def _fail_matplotlib(name, *args, **kwargs):
+            if name == "matplotlib":
+                raise ImportError("simulated missing matplotlib")
+            return original_import(name, *args, **kwargs)
+
+        import builtins
+        monkeypatch.setattr(builtins, "__import__", _fail_matplotlib)
+
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result = reporter_mod.export_plots(run_pk=99999, output_dir="/tmp/test_plots")
+
+        assert result == []
+        assert any("matplotlib" in str(warning.message).lower() for warning in w)
+
+
 # ── TestSliceMetricsProperties ─────────────────────────────────────────────────
 
 class TestSliceMetricsProperties:

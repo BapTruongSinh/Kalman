@@ -26,18 +26,6 @@ from estimation.evaluation.metrics import (
 )
 from estimation.models import EvaluationSummary, ExperimentRun, PipelineCycle
 
-# ── Optional plotting back-end ─────────────────────────────────────────────────
-try:
-    import matplotlib
-
-    matplotlib.use("Agg")  # non-interactive back-end
-    import matplotlib.pyplot as plt
-    import matplotlib.dates as mdates
-
-    _HAS_MATPLOTLIB = True
-except Exception:  # ImportError or numpy ABI mismatch
-    _HAS_MATPLOTLIB = False
-
 # ── Constants ─────────────────────────────────────────────────────────────────
 _ALL_SLICES = ("train", "validation", "test")
 _CYCLE_VALUE_FIELDS = (
@@ -438,7 +426,16 @@ def export_plots(run_pk: int, output_dir: "Path | str") -> list[Path]:
     list[Path]
         Paths of the generated PNG files.
     """
-    if not _HAS_MATPLOTLIB:
+    # Lazy import — only this function touches matplotlib so the ABI
+    # traceback (if any) never appears when calling evaluate_slice or
+    # build_text_report.
+    try:
+        import matplotlib  # noqa: PLC0415
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt  # noqa: PLC0415
+        import matplotlib.dates as mdates  # noqa: PLC0415
+    except Exception:  # ImportError or numpy ABI mismatch
         import warnings
 
         warnings.warn(
