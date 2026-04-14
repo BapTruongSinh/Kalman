@@ -266,6 +266,13 @@ class PipelineCycle(models.Model):
     )
     error_message = models.CharField(max_length=512, null=True, blank=True)
 
+    # --- Performance ---
+    latency_ms = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="Wall-clock time for this Kalman step in milliseconds",
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -367,6 +374,32 @@ class EvaluationSummary(models.Model):
         help_text="mae_filtered / mae_arx; must be <= 1.05 on test slice",
     )
 
+    # --- Adaptive status distribution ---
+    n_r_updated = models.IntegerField(
+        default=0,
+        help_text="Cycles where adaptive R was updated (R_updated)",
+    )
+    n_r_skipped = models.IntegerField(
+        default=0,
+        help_text="Cycles where R update was skipped (no measurement)",
+    )
+    n_adaptive_skipped = models.IntegerField(
+        default=0,
+        help_text="Cycles on the error path (adaptive_status=skipped)",
+    )
+
+    # --- Latency ---
+    latency_mean_ms = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="Mean wall-clock time per Kalman step in milliseconds",
+    )
+    latency_p95_ms = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="95th-percentile wall-clock time per step in milliseconds",
+    )
+
     # --- Innovation and adaptive R diagnostics ---
     innovation_mean = models.FloatField(null=True, blank=True)
     innovation_std = models.FloatField(null=True, blank=True)
@@ -399,6 +432,20 @@ class EvaluationSummary(models.Model):
 
     def __str__(self) -> str:
         return f"Eval [{self.slice_type}] for Run #{self.run_id}"
+
+    @property
+    def cycle_success_rate(self) -> float | None:
+        """Fraction of cycles that completed normally (n_valid / n_samples)."""
+        if self.n_samples == 0:
+            return None
+        return self.n_valid / self.n_samples
+
+    @property
+    def sample_loss_rate(self) -> float | None:
+        """Fraction of samples that were skipped or errored ((n_skipped + n_error) / n_samples)."""
+        if self.n_samples == 0:
+            return None
+        return (self.n_skipped + self.n_error) / self.n_samples
 
     @property
     def passes_acceptance_gate(self) -> bool:

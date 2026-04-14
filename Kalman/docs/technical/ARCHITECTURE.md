@@ -461,6 +461,104 @@ Pipeline failures and skipped updates are stored as explicit rows with
 `cycle_status="error"` (+ non-null `error_message`) or
 `cycle_status="skipped_no_measurement"`, never silently dropped.
 
+Also, `latency_ms` from `CycleResult` is persisted in `PipelineCycle.latency_ms` (nullable
+`FloatField`) to enable per-cycle performance tracing.
+
+---
+
+## Evaluation Module (`estimation.evaluation`)
+
+Implemented in Task #008.  The evaluation layer computes aggregated metrics from
+`PipelineCycle` rows, persists them to `EvaluationSummary`, and generates
+report-ready exports.
+
+### Package layout
+
+```
+estimation/evaluation/
+    __init__.py   — public API (pure metrics importable without Django)
+    metrics.py    — SliceMetrics dataclass + compute_metrics() pure function
+    reporter.py   — DB integration, evaluate_slice/all_slices, text/CSV/plot export
+```
+
+### Public API
+
+| Symbol | Type | Purpose |
+|--------|------|---------|
+| `SliceMetrics` | frozen dataclass | All computed metrics for one data slice |
+| `compute_metrics(rows)` | pure function | Compute metrics from a list of cycle-row dicts |
+| `VARIANCE_REDUCTION_MIN` | constant `0.20` | ADR-003 acceptance threshold |
+| `RMSE_RATIO_MAX` | constant `1.05` | ADR-003 acceptance threshold |
+| `MAE_RATIO_MAX` | constant `1.05` | ADR-003 acceptance threshold |
+| `evaluate_slice(run_pk, slice_type)` | DB function | Compute → persist → return `EvaluationSummary` |
+| `evaluate_all_slices(run_pk)` | DB function | Evaluate all three slices; returns `dict[str, EvaluationSummary]` |
+| `build_text_report(run_pk)` | export | Human-readable multi-section text report |
+| `export_to_csv(run_pk, output_path)` | export | CSV with one row per slice; returns resolved `Path` |
+| `export_plots(run_pk, output_dir)` | export | PNG diagnostics (requires `matplotlib`); returns `list[Path]` |
+
+### SliceMetrics fields
+
+| Field | Description |
+|-------|-------------|
+| `n_samples` | Total cycles in the slice |
+| `n_valid` | Cycles with `cycle_status="ok"` |
+| `n_skipped` | Cycles with `cycle_status` starting with `"skipped"` |
+| `n_error` | Cycles with `cycle_status="error"` |
+| `n_r_updated` | Adaptive status `"R_updated"` count |
+| `n_r_skipped` | Adaptive status `"R_skipped"` count |
+| `n_adaptive_skipped` | Adaptive status `"skipped"` (error path) count |
+| `latency_mean_ms` | Mean per-cycle wall-clock time |
+| `latency_p95_ms` | 95th-percentile per-cycle wall-clock time |
+| `rmse_arx` / `mae_arx` | ARX prediction accuracy vs raw reference |
+| `rmse_filtered` / `mae_filtered` | Kalman filter accuracy vs raw reference |
+| `variance_reduction` | `1 − var(diff(filtered)) / var(diff(raw))` |
+| `rmse_ratio` / `mae_ratio` | Guardrail: `rmse_filtered / rmse_arx` |
+| `innovation_mean` / `_std` / `_max_abs` | Innovation sequence diagnostics |
+| `R_mean` / `_min_observed` / `_max_observed` | Adaptive R diagnostics |
+| `P_mean` / `P_max` | Posterior covariance diagnostics |
+| `pass_variance_reduction` | `variance_reduction >= 0.20` |
+| `pass_rmse_guardrail` | `rmse_ratio <= 1.05` |
+| `pass_mae_guardrail` | `mae_ratio <= 1.05` |
+| `passes_acceptance_gate` | All three ADR-003 flags are `True` |
+| `cycle_success_rate` *(property)* | `n_valid / n_samples` |
+| `sample_loss_rate` *(property)* | `(n_skipped + n_error) / n_samples` |
+
+### Django coupling and lazy imports
+
+`estimation.evaluation.metrics` has **no Django dependency** and can be imported
+in any context (e.g. standalone scripts, pure unit tests) without setting
+`DJANGO_SETTINGS_MODULE`.  The DB-backed functions in `reporter.py` are imported
+lazily via `__getattr__` in the package `__init__.py`, mirroring the same pattern
+used by `estimation.run_config`.
+
+### Report structure (`build_text_report`)
+
+The text report contains the following sections (columns: Train / Validation / Test):
+
+1. Sample counts & cycle success rate / sample loss rate
+2. Latency (mean + P95)
+3. ARX baseline accuracy (RMSE, MAE)
+4. Kalman filter accuracy (RMSE, MAE, guardrail ratios)
+5. Variance reduction (ADR-003)
+6. Innovation diagnostics
+7. Adaptive R diagnostics
+8. Posterior covariance
+9. **ADR-003 acceptance gate** (Test slice only) — PASS / FAIL per criterion
+10. AMPC readiness placeholder
+
+### Plot export (`export_plots`)
+
+Requires `matplotlib >= 3.8` (optional; gracefully skipped if unavailable or if
+the installed `matplotlib` was compiled against a different NumPy ABI).  Produces
+four PNGs per slice:
+
+| File | Contents |
+|------|---------|
+| `time_series_{slice}.png` | Raw / ARX predicted / Kalman filtered over time |
+| `innovation_{slice}.png` | Innovation sequence `eₖ` over time |
+| `adaptive_R_{slice}.png` | Adaptive measurement noise `Rₖ` over time |
+| `residuals_{slice}.png` | Histogram of `raw − filtered` residuals |
+
 ---
 
 ## AMPC-Ready Modeling Boundary

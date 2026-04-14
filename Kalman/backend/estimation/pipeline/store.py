@@ -105,6 +105,7 @@ def map_result_to_cycle(
     adaptive_status          → adaptive_status
     cycle_status             → cycle_status
     error_message            → error_message
+    latency_ms               → latency_ms
 
     Run-level metadata is supplied by the caller:
     run, slice_type, source_type → PipelineCycle columns of the same name.
@@ -170,6 +171,8 @@ def map_result_to_cycle(
         # ── Cycle outcome ─────────────────────────────────────────────────────
         cycle_status=result.cycle_status,
         error_message=result.error_message,
+        # ── Performance ───────────────────────────────────────────────────────
+        latency_ms=result.latency_ms,
     )
 
 
