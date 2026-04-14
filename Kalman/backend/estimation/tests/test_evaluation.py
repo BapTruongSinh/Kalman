@@ -1060,6 +1060,39 @@ class TestBuildTextReport:
         assert isinstance(result, str)
         assert len(result) > 100
 
+    def test_null_gate_shows_na_not_fail(self, run, cycle_factory):
+        """When any ADR-003 gate flag is None the text report must say N/A."""
+        from estimation.evaluation.reporter import build_text_report
+        from estimation.models import EvaluationSummary
+
+        # Populate cycles so evaluate_slice can run for all three slices
+        for i in range(3):
+            for st in ("train", "validation", "test"):
+                cycle_factory(
+                    slice_type=st,
+                    index=i + {"train": 0, "validation": 100, "test": 200}[st],
+                )
+
+        # Manually patch the test-slice summary so one flag is None
+        EvaluationSummary.objects.filter(run=run, slice_type="test").update(
+            pass_variance_reduction=None
+        )
+
+        report = build_text_report(run.pk)
+
+        # Overall gate line must not say FAIL when a flag is unknown
+        import re
+        gate_line = next(
+            (l for l in report.splitlines() if "Overall ADR-003 gate" in l), None
+        )
+        assert gate_line is not None, "Gate line not found in report"
+        assert "FAIL" not in gate_line, (
+            f"Expected N/A for null gate but got: {gate_line!r}"
+        )
+        assert "N/A" in gate_line, (
+            f"Expected 'N/A' in gate line but got: {gate_line!r}"
+        )
+
 
 # ── TestExportToCsv ────────────────────────────────────────────────────────────
 

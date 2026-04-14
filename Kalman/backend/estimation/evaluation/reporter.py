@@ -275,7 +275,8 @@ def build_text_report(run_pk: int) -> str:
         f"              {fmt(test.mae_ratio):>10}    {flag(test.pass_mae_guardrail)}"
     )
     rule()
-    gate_label = "PASS" if test.passes_acceptance_gate else "FAIL"
+    _gate = test.passes_acceptance_gate
+    gate_label = "PASS ✓" if _gate is True else ("FAIL ✗" if _gate is False else "N/A (flags incomplete)")
     lines.append(f"  Overall ADR-003 gate:  {gate_label}")
 
     # ── AMPC readiness placeholder ─────────────────────────────────────────
