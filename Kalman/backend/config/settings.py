@@ -31,8 +31,36 @@ ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost 127.0.0.1").sp
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
+    "corsheaders",
+    "rest_framework",
     "estimation",
 ]
+
+# --- Middleware ---
+MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
+    "django.middleware.common.CommonMiddleware",
+]
+
+# --- URL routing ---
+ROOT_URLCONF = "config.urls"
+
+# --- Django REST Framework ---
+REST_FRAMEWORK = {
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+    ]
+    + (["rest_framework.renderers.BrowsableAPIRenderer"] if DEBUG else []),
+    "DEFAULT_AUTHENTICATION_CLASSES": [],
+    "DEFAULT_PERMISSION_CLASSES": [],
+}
+
+# --- CORS (allow all in dev; tighten in production via env) ---
+_cors_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "")
+if _cors_origins:
+    CORS_ALLOWED_ORIGINS = _cors_origins.split()
+else:
+    CORS_ALLOW_ALL_ORIGINS = DEBUG
 
 # --- Database (MySQL from XAMPP) ---
 DATABASES = {

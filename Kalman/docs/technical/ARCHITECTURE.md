@@ -47,11 +47,16 @@ Adaptive Kalman-ready update block
 
 | Layer | Technology | Version | Why Chosen |
 |-------|------------|---------|------------|
-| Frontend | Vite | TBD | Lightweight dashboard and charting shell |
-| Styling | TBD | TBD | Design system not finalized for v1 |
-| Backend | Python / Django | TBD | Python fits ARX/Kalman work; Django ORM selected for persistence |
-| Database | MySQL from XAMPP | TBD | Local development database already chosen by project owner |
-| ORM | Django ORM | TBD | Structured persistence and query layer for experiment logs |
+| Frontend | Vite + React 19 + TypeScript | 6.x / 19.x | Lightweight dashboard; fast HMR |
+| Styling | Tailwind CSS v4 | 4.x | Utility-first; co-located with component |
+| Charting | Recharts | 2.x | Composable React charting; accessible SVG |
+| Data fetching | TanStack Query | 5.x | Server-state caching and refetch |
+| Frontend testing | Vitest + Testing Library | 4.x / 16.x | jsdom unit tests collocated with code |
+| Backend | Python / Django | 4.x | Python fits ARX/Kalman work; Django ORM selected for persistence |
+| REST API | Django REST Framework | 3.15+ | Serializer/view layer for dashboard API |
+| CORS | django-cors-headers | 4.x | Dev proxy bypass for Vite dev server |
+| Database | MySQL from XAMPP | 8.x | Local development database already chosen by project owner |
+| ORM | Django ORM | 4.x | Structured persistence and query layer for experiment logs |
 | Auth | TBD | TBD | Needed for authorized configuration changes |
 | Hosting | AWS | TBD | Deployment target selected; exact service still open |
 | CI/CD | TBD | TBD | Not required for initial local validation |
@@ -62,15 +67,29 @@ Adaptive Kalman-ready update block
 
 ### Frontend Architecture
 
-This section remains a template until the dashboard implementation begins.
+The dashboard is a single-page Vite + React + TypeScript application located at `Kalman/dashboard/`.
+It proxies `/api/*` to the Django dev server at `127.0.0.1:8000`.
 
-**Routing**: TBD.
+**Routing**: None (single-page; run selected via sidebar).
 
-**State management**: TBD.
+**State management**: TanStack Query for server state; local `useState` for UI controls.
 
 **Component structure**:
 
 ```text
+dashboard/src/
+  api/
+    client.ts        – fetch helpers for /api/runs/, /series/, /metrics/
+    types.ts         – TypeScript types matching DRF serializers
+  components/
+    RunSelector.tsx  – sidebar list with status dot
+    SliceChart.tsx   – three-series Recharts line chart (raw/ARX/KF)
+    AdaptiveStatusBar.tsx – R_updated / R_skipped / skipped counts
+    MetricsPanel.tsx – per-slice metrics table with acceptance gate
+    RunDashboard.tsx – composes chart + bar + metrics for one run
+  __tests__/         – Vitest + Testing Library unit tests
+  test/setup.ts      – jest-dom + ResizeObserver mock
+  App.tsx            – QueryClientProvider + sidebar + main layout
 src/components/
   ui/
   features/

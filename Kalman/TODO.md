@@ -13,7 +13,6 @@ No task currently in progress.
 
 ## Up Next (prioritized)
 
-- [ ] #009 - Build raw, predicted, and filtered dashboard view [area: frontend] -> [.tasks/009-raw-predicted-filtered-dashboard.md](.tasks/009-raw-predicted-filtered-dashboard.md)
 - [ ] #011 - Add missing and noisy data robustness tests [area: qa] -> [.tasks/011-missing-noisy-data-robustness-tests.md](.tasks/011-missing-noisy-data-robustness-tests.md)
 
 ---
@@ -28,6 +27,7 @@ No task currently in progress.
 
 ## Completed
 
+- [x] #009 - Build raw, predicted, and filtered dashboard view -> [.tasks/009-raw-predicted-filtered-dashboard.md](.tasks/009-raw-predicted-filtered-dashboard.md)
 - [x] #008 - Build evaluation metrics and report export -> [.tasks/008-evaluation-metrics-report-export.md](.tasks/008-evaluation-metrics-report-export.md)
 - [x] #007 - Store run outputs and pipeline logs -> [.tasks/007-store-run-outputs-pipeline-logs.md](.tasks/007-store-run-outputs-pipeline-logs.md)
 - [x] #006 - Add experiment configuration persistence -> [.tasks/006-experiment-configuration-persistence.md](.tasks/006-experiment-configuration-persistence.md)
