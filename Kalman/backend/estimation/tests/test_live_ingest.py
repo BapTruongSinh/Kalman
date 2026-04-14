@@ -210,6 +210,32 @@ def test_completed_live_run_returns_409(auth_client, db):
     assert resp.status_code == 409
 
 
+@pytest.mark.django_db
+def test_status_guard_inside_lock_prevents_cycle_creation(auth_client, db):
+    """TOCTOU regression: status check executed inside the locked transaction.
+
+    Simulates the race window where a run transitions to a terminal state
+    *after* the fast pre-check (which only verifies run_type) but while the
+    lock is being acquired.  The authoritative guard inside the atomic block
+    must catch the stale status and return 409 without persisting any cycle.
+    """
+    # Run is LIVE+COMPLETED: the .filter(run_type=LIVE).exists() pre-check
+    # passes (type is correct), but the inside-lock status guard must fire.
+    run = ExperimentRun.objects.create(
+        name="toctou-completed",
+        run_type=ExperimentRun.RunType.LIVE,
+        status=ExperimentRun.Status.COMPLETED,
+    )
+    resp = auth_client.post(
+        _INGEST_URL,
+        {**_VALID_PAYLOAD, "run_id": run.pk},
+        format="json",
+    )
+    assert resp.status_code == 409
+    # No cycle must have been written — the atomic block rolled back cleanly.
+    assert PipelineCycle.objects.filter(run=run).count() == 0
+
+
 # ── Payload validation ─────────────────────────────────────────────────────────
 
 
@@ -253,7 +279,8 @@ def test_out_of_range_sample_returns_201_with_skipped_status(auth_client, live_r
 
 @pytest.mark.django_db
 def test_null_soil_moisture_accepted(auth_client, live_run):
-    """Null primary channel → Kalman skips measurement update, still 201."""
+    """Null primary channel → validate_live_record returns missing → preprocess_status
+    'skipped', Kalman skips measurement update, still 201."""
     payload = {
         "run_id": live_run.pk,
         "timestamp": "2026-04-14T12:00:00Z",
@@ -262,6 +289,9 @@ def test_null_soil_moisture_accepted(auth_client, live_run):
     resp = auth_client.post(_INGEST_URL, payload, format="json")
     assert resp.status_code == 201
     body = resp.json()
+    assert body["preprocess_status"] == "skipped", (
+        "soil_moisture=null must produce preprocess_status='skipped', not 'valid'"
+    )
     assert body["cycle_status"] == "skipped_no_measurement"
 
 
@@ -553,8 +583,8 @@ def test_validate_live_record_absent_ancillary_still_valid():
     assert vr.is_valid, vr.reason
 
 
-def test_validate_live_record_all_absent_is_valid():
-    """Even all-None record is valid under live rules — Kalman will just skip."""
+def test_validate_live_record_absent_sm_is_missing():
+    """soil_moisture=None → is_valid=False, status='missing' (primary channel absent)."""
     from datetime import datetime, timezone
     from estimation.ingestion.validator import validate_live_record, DEFAULT_CONFIG
     raw = RawRecord(
@@ -569,7 +599,8 @@ def test_validate_live_record_all_absent_is_valid():
         row_index=0,
     )
     vr = validate_live_record(raw, DEFAULT_CONFIG)
-    assert vr.is_valid
+    assert not vr.is_valid
+    assert vr.status == "missing"
 
 
 def test_validate_live_record_out_of_range_field_is_invalid():
@@ -581,7 +612,7 @@ def test_validate_live_record_out_of_range_field_is_invalid():
 
 
 def test_validate_live_record_absent_sm_with_present_oor_ancillary_invalid():
-    """Present but OOR ancillary must fail even when soil_moisture is absent."""
+    """Absent soil_moisture → 'missing' regardless of ancillary OOR values."""
     from datetime import datetime, timezone
     from estimation.ingestion.validator import validate_live_record, DEFAULT_CONFIG
     raw = RawRecord(

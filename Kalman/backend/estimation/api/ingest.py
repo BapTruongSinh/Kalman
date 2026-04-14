@@ -218,50 +218,59 @@ class LiveIngestView(APIView):
         data = serializer.validated_data
         run_id: int = data["run_id"]
 
-        # ── Guard the run (outside transaction — read-only check) ─────────────
-        try:
-            # select_for_update used later inside the atomic block; here we
-            # just check existence and type without locking.
-            run = ExperimentRun.objects.select_related("config").get(
-                pk=run_id,
-                run_type=ExperimentRun.RunType.LIVE,
-            )
-        except ExperimentRun.DoesNotExist:
+        # ── Fast pre-check: reject obviously wrong run_id before acquiring lock ─
+        # This is an optimistic guard only — the authoritative checks (type and
+        # status) happen inside the atomic block where the row is locked.
+        if not ExperimentRun.objects.filter(
+            pk=run_id, run_type=ExperimentRun.RunType.LIVE
+        ).exists():
             return Response(
                 {"error": f"Live ExperimentRun id={run_id} not found."},
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if run.status != ExperimentRun.Status.RUNNING:
-            return Response(
-                {
-                    "error": (
-                        f"Run {run_id} is '{run.status}', not 'running'. "
-                        "Transition the run to 'running' before sending samples."
-                    )
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-
-        # ── Load Kalman config (outside transaction — immutable snapshot) ──────
-        try:
-            kalman_config = _kalman_config_from_db(run.config)
-        except ExperimentConfig.DoesNotExist:
-            logger.warning(
-                "Live run %d has no ExperimentConfig; using ADR-003 defaults.",
-                run_id,
-            )
-            kalman_config = KalmanConfig()
-
-        # ── Atomic: lock run row, reconstruct state, validate, step, persist ────
-        # The unique constraint on (run, cycle_index) means two concurrent
-        # requests for the same run could both derive the same next index and
-        # one would raise IntegrityError.  We prevent this by locking the
-        # ExperimentRun row so only one request at a time can enter this block
-        # for a given run.
+        # ── Atomic: lock run row, re-check state, reconstruct, step, persist ───
+        # ALL state-sensitive guards (run_type, status) are evaluated *after*
+        # acquiring the row lock so that a concurrent status transition
+        # (running → completed) cannot slip through between the pre-check and
+        # the write.  This eliminates the TOCTOU race reported in the audit.
+        #
+        # The unique constraint on (run, cycle_index) is also protected by the
+        # same lock — only one request per run can compute and save a new
+        # cycle_index at a time.
         with transaction.atomic():
-            # Re-fetch run with a row lock.
-            run = ExperimentRun.objects.select_for_update().get(pk=run_id)
+            # Lock + eager-load config in a single query.
+            try:
+                run = ExperimentRun.objects.select_for_update().select_related(
+                    "config"
+                ).get(pk=run_id, run_type=ExperimentRun.RunType.LIVE)
+            except ExperimentRun.DoesNotExist:
+                return Response(
+                    {"error": f"Live ExperimentRun id={run_id} not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+            # Authoritative status guard — evaluated with the row lock held.
+            if run.status != ExperimentRun.Status.RUNNING:
+                return Response(
+                    {
+                        "error": (
+                            f"Run {run_id} is '{run.status}', not 'running'. "
+                            "Transition the run to 'running' before sending samples."
+                        )
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            # Load Kalman config from the already-fetched relation (no extra query).
+            try:
+                kalman_config = _kalman_config_from_db(run.config)
+            except ExperimentConfig.DoesNotExist:
+                logger.warning(
+                    "Live run %d has no ExperimentConfig; using ADR-003 defaults.",
+                    run_id,
+                )
+                kalman_config = KalmanConfig()
 
             last_cycle: PipelineCycle | None = (
                 PipelineCycle.objects.filter(run=run).order_by("-cycle_index").first()
@@ -273,9 +282,8 @@ class LiveIngestView(APIView):
 
             # Use validate_live_record — ancillary fields are optional for
             # live ingestion; only fields that ARE present are range-checked.
-            # This ensures a minimal payload (run_id + timestamp +
-            # soil_moisture) is accepted and yields preprocess_status="valid"
-            # rather than being silently skipped for missing context channels.
+            # soil_moisture=None → is_valid=False (missing) → preprocess_status="skipped".
+            # A present, in-range soil_moisture → is_valid=True → preprocess_status="valid".
             validation = validate_live_record(raw_record, config=DEFAULT_VALIDATION_CONFIG)
             processed = preprocess_single(raw_record, validation)
 

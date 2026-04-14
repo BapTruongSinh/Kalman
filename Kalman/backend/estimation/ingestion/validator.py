@@ -200,13 +200,14 @@ def validate_live_record(
 
     Rules
     -----
-    * A field that is ``None`` is simply skipped — no ``"missing"`` error.
+    * ``soil_moisture`` is the **primary channel**: when it is ``None`` the
+      function returns ``is_valid=False`` with ``status="missing"`` so that
+      :func:`~preprocessor.preprocess_single` produces
+      ``preprocess_status="skipped"`` (consistent with the offline path).
+    * Ancillary fields (temperature, humidity, light, drip, mist, fan) are
+      optional.  A ``None`` ancillary value is silently accepted.
     * A field that IS present must be finite and within the configured physical
       bounds; otherwise the record is ``"out_of_range"``.
-    * ``soil_moisture`` receives the same treatment as all other fields: when
-      absent (``None``) the record is still considered ``"valid"`` but the
-      Kalman measurement-update step will be skipped (``preprocess_status``
-      will be ``"skipped"`` from :func:`~preprocessor.preprocess_single`).
 
     This function intentionally does **not** perform suspicious-repeat
     detection — a live path typically has no preceding history at hand.
@@ -221,8 +222,17 @@ def validate_live_record(
     Returns
     -------
     ValidationResult
-        ``is_valid=True`` when all *present* fields are finite and in-range.
+        ``is_valid=True`` only when ``soil_moisture`` is present *and* all
+        present fields are finite and in-range.
     """
+    # Primary-channel guard: no measurement → Kalman cannot update → skip.
+    if record.soil_moisture is None:
+        return ValidationResult(
+            is_valid=False,
+            status="missing",
+            reason="soil_moisture is absent; Kalman measurement-update step skipped",
+        )
+
     out_of_range = []
     for attr, min_attr, max_attr in _RANGE_CHECKS:
         val = getattr(record, attr)
