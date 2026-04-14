@@ -61,6 +61,21 @@ def _safe_getattr(obj: object, name: str, default: object) -> object:
         return default
 
 
+def _safe_finite_float_or_none(value: object) -> float | None:
+    """Convert *value* to a finite ``float``, or return ``None`` — **never raises**.
+
+    Handles ``float`` subclasses that override ``__float__`` to raise (e.g.
+    ``ExplodingFloat``).  Both the ``float()`` coercion and the ``isfinite``
+    check are wrapped in a single ``try/except`` so only one conversion is
+    performed and no exception can escape.
+    """
+    try:
+        f = float(value)  # type: ignore[arg-type]
+        return f if math.isfinite(f) else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 
 
@@ -78,8 +93,9 @@ class KalmanConfig:
     P0:
         Initial error covariance (> 0).
     Q:
-        Process noise covariance (> 0); fixed for the duration of a run,
-        tuned on the validation slice.
+        Process noise covariance (>= 0); fixed for the duration of a run,
+        tuned on the validation slice.  Zero means perfectly predictable
+        dynamics (no process noise).
     R0:
         Initial measurement noise covariance (> 0); must be in [R_min, R_max].
     R_min:
@@ -343,11 +359,7 @@ class AdaptiveKalmanCycle:
             _ts_raw = _safe_getattr(_raw, "timestamp", _EPOCH)
             _ts: datetime = _ts_raw if isinstance(_ts_raw, datetime) else _EPOCH
             _sm_raw = _safe_getattr(_raw, "soil_moisture", None)
-            _raw_sm: float | None = (
-                float(_sm_raw)
-                if isinstance(_sm_raw, (int, float)) and math.isfinite(float(_sm_raw))
-                else None
-            )
+            _raw_sm: float | None = _safe_finite_float_or_none(_sm_raw)
             _ps_raw = _safe_getattr(record, "preprocess_status", "invalid")
             _pre_status: str = _ps_raw if isinstance(_ps_raw, str) else "invalid"
             # State is NOT mutated in the error branch — keep last known good values.

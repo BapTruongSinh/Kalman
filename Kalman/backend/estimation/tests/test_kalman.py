@@ -823,6 +823,35 @@ class TestNeverRaises:
         assert result.cycle_status == "error"
         assert result.raw_soil_moisture is None
 
+    def test_step_with_exploding_float_subclass_never_raises(self):
+        """float() on a subclass overriding __float__ to raise must not escape step().
+
+        isinstance(x, float) is True for subclasses, so the previous inline
+        ``float(_sm_raw)`` call was not guarded.  _safe_finite_float_or_none()
+        wraps the conversion in try/except and returns None instead.
+        """
+
+        class ExplodingFloat(float):
+            def __float__(self) -> float:
+                raise RuntimeError("float conversion exploded")
+
+        class RawBadSMConversion:
+            timestamp = None
+            soil_moisture = ExplodingFloat(1.0)
+
+        class BadSMConversionRecord:
+            raw = RawBadSMConversion()
+            preprocess_status = "valid"
+
+        cfg = KalmanConfig(x0=60.0)
+        est = AdaptiveKalmanCycle(cfg)
+        try:
+            result = est.step(BadSMConversionRecord(), cycle_index=0)  # type: ignore[arg-type]
+        except Exception as exc:
+            pytest.fail(f"step(ExplodingFloat record) raised: {exc}")
+        assert result.cycle_status == "error"
+        assert result.raw_soil_moisture is None
+
 
 # ── TestRealData ──────────────────────────────────────────────────────────────
 

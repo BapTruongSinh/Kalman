@@ -255,7 +255,7 @@ from estimation.kalman import (
 **`KalmanState`** — mutable dataclass updated in-place each cycle:
 `x_post`, `P_post`, `R`, `step`.
 
-**`CycleResult`** — frozen per-cycle output, mirrors `PipelineCycle` Django model:
+**`CycleResult`** — frozen per-cycle output; contains the Kalman subset needed to populate `PipelineCycle` (Task #007 mapper adds run-level metadata, `kf_` prefixes, etc.):
 
 | Field | Type | Meaning |
 |-------|------|---------|
