@@ -9,77 +9,297 @@ Read by: @backend-developer and @systems-architect
 
 > **Engine**: MySQL from XAMPP
 > **ORM / Query layer**: Django ORM
-> **Connection**: `DATABASE_URL` or Django database settings
+> **Connection**: `DATABASE_URL` or Django `DATABASES` settings
 > **Last updated**: 2026-04-14
+
+---
+
+## Storage Format Decision (from ADR-003 / task #001)
+
+| Question | Decision |
+|----------|----------|
+| Official local source of truth | MySQL from XAMPP via Django ORM |
+| CSV role | Snapshot / export format and offline replay input; not the permanent write target |
+| Live sensor storage | Uses the same MySQL tables; `pipeline_cycles.source_type` distinguishes replay vs live rows |
+| Export policy | Any run can be exported to CSV on demand; no automatic CSV write during replay |
 
 ---
 
 ## Schema Overview
 
-The v1 schema is not implemented yet. It must support experiment reproducibility and traceability for the prediction plus Adaptive Kalman-ready pipeline, with enough metadata to feed later AMPC analysis.
-
-Expected conceptual entities:
+Five tables cover one full replay or live run, from configuration through per-cycle estimation to held-out evaluation metrics.
 
 ```text
-experiment_runs
-  |
-  +-- experiment_configs
-  |
-  +-- raw_measurements
-  |
-  +-- prediction_outputs
-  |
-  +-- filtered_estimates
-  |
-  +-- adaptive_estimator_statuses
-  |
-  +-- pipeline_events
-  |
-  +-- evaluation_metrics
+experiment_runs  (1)
+     |
+     +--< experiment_configs     (1:1 per run, frozen snapshot)
+     |
+     +--< arx_artifacts          (1:1 per run, frozen trained coefficients)
+     |
+     +--< pipeline_cycles        (1:N per run, one row per time step)
+     |
+     +--< evaluation_summaries   (1:3 per run, one row per slice: train/val/test)
 ```
 
 ---
 
-## Required Stored Data
+## Table: `experiment_runs`
 
-| Data | Required | Notes |
-|------|----------|-------|
-| Raw measurement | Yes | Original input values from CSV or live sample |
-| Timestamp | Yes | Source timestamp or ingestion timestamp |
-| Variable identifier | Yes | Example: soil moisture, temperature, humidity, light |
-| Preprocessing status | Yes | Valid, corrected, interpolated, skipped, or invalid |
-| Prediction output | Yes | Prediction used by the estimator update; ARX is the initial baseline |
-| Filtered estimate | Yes | Adaptive Kalman-ready filtered output |
-| Residual / innovation | Yes | Diagnostic value for evaluation |
-| Adaptive status | TBD | Parameter update status or rationale if adaptive behavior is enabled |
-| AMPC handoff fields | TBD | Candidate state/control/disturbance identifiers when task #013 finalizes them |
-| Pipeline status log | Yes | Step status, failures, skipped updates |
-| Run configuration | Yes | Sampling time, initial state, covariance settings, adaptive bounds/rules, prediction model settings |
+One row per replay or live estimation run. The single reference point for tracing all outputs.
 
----
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| `id` | INT AUTO_INCREMENT | No | — | Primary key |
+| `name` | VARCHAR(255) | No | — | Human-readable run label |
+| `run_type` | VARCHAR(20) | No | `'offline_replay'` | Django choices: `offline_replay`, `live` |
+| `status` | VARCHAR(20) | No | `'pending'` | Django choices: `pending`, `running`, `completed`, `failed`, `aborted` |
+| `dataset_source` | VARCHAR(512) | Yes | NULL | CSV path or MySQL table/query description used for this run |
+| `created_at` | DATETIME | No | `NOW()` | Row creation time |
+| `started_at` | DATETIME | Yes | NULL | Set when run begins |
+| `completed_at` | DATETIME | Yes | NULL | Set when run ends |
+| `notes` | TEXT | Yes | NULL | Free-form comments |
 
-## Candidate Tables
+**Indexes**: PRIMARY KEY (`id`), INDEX `idx_runs_status` (`status`), INDEX `idx_runs_created` (`created_at`)
 
-These are planning placeholders and should be replaced by Django model details once task #002 is complete.
-
-| Table | Purpose | Status |
-|-------|---------|--------|
-| `experiment_runs` | One row per replay or live test run | Planned |
-| `experiment_configs` | Saved configuration snapshot for reproducibility | Planned |
-| `raw_measurements` | Raw sensor or dataset rows | Planned |
-| `prediction_outputs` | Prediction outputs per time step; ARX baseline first | Planned |
-| `filtered_estimates` | Filtered state and residual/innovation data per time step | Planned |
-| `adaptive_estimator_statuses` | Adaptive parameter status, rule names, and bounds when enabled | Planned |
-| `pipeline_events` | Validation, preprocessing, and runtime status logs | Planned |
-| `evaluation_metrics` | Variance reduction, residual behavior, MAE/RMSE, latency, sample loss, optional AMPC-readiness metrics | Planned |
+> `run_type` and `status` are `VARCHAR` validated via Django choices, not MySQL `ENUM`.
 
 ---
 
-## Open Decisions
+## Table: `experiment_configs`
 
-- Whether official v1 storage is MySQL only or MySQL plus CSV export.
-- Which variables are first-class estimated state variables.
-- Whether the official first AMPC state is soil moisture `theta`, root-zone depletion `Dr`, or both.
-- Whether covariance values are stored for every time step or only summary diagnostics.
-- Whether adaptive status is stored inline with estimates or in a separate table.
-- Whether live sensor samples and CSV replay samples share one table or use separate source-specific tables.
+Frozen configuration snapshot created at run start. Guarantees reproducibility: re-running from the same CSV with the same config must produce identical outputs.
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| `id` | INT AUTO_INCREMENT | No | — | Primary key |
+| `run_id` | INT | No | — | FK → `experiment_runs.id` |
+| `x0` | FLOAT | No | 0.0 | Initial Kalman state estimate (first observed `Soil_Moisture`) |
+| `P0` | FLOAT | No | 1.0 | Initial state covariance |
+| `Q` | FLOAT | No | 0.05 | Process noise; selected by validation tuning, default 0.05 |
+| `R0` | FLOAT | No | 1.0 | Initial measurement noise (adaptive `R` starts here) |
+| `R_min` | FLOAT | No | 0.05 | Lower bound for adaptive `R` |
+| `R_max` | FLOAT | No | 25.0 | Upper bound for adaptive `R` |
+| `alpha` | FLOAT | No | 0.95 | EMA smoothing factor for adaptive `R` update |
+| `train_ratio` | FLOAT | No | 0.60 | Fraction of time-series used for ARX retraining |
+| `val_ratio` | FLOAT | No | 0.20 | Fraction used for parameter tuning |
+| `test_ratio` | FLOAT | No | 0.20 | Fraction reserved for held-out evaluation |
+| `arx_na` | INT | No | 2 | ARX output lag order |
+| `arx_nb` | INT | No | 2 | ARX input lag order |
+| `arx_nk` | INT | No | 1 | ARX input delay |
+| `preprocessing_policy` | VARCHAR(20) | No | `'keep_last'` | Django choices: `keep_last`, `interpolate`, `skip` |
+| `raw_config_json` | TEXT | No | `'{}'` | Full serialized config as JSON for complete reproducibility |
+| `created_at` | DATETIME | No | `NOW()` | — |
+
+**Indexes**: PRIMARY KEY (`id`), UNIQUE KEY `uq_config_run` (`run_id`)
+
+---
+
+## Table: `arx_artifacts`
+
+Stores the trained ARX model coefficients and performance summary for the run. One artifact per run; created after the train slice is used to retrain ARX.
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| `id` | INT AUTO_INCREMENT | No | — | Primary key |
+| `run_id` | INT | No | — | FK → `experiment_runs.id` |
+| `na` | INT | No | — | Output lag order used for training |
+| `nb` | INT | No | — | Input lag order used for training |
+| `nk` | INT | No | — | Input delay used for training |
+| `n_train_samples` | INT | No | — | Number of rows in the train slice |
+| `train_start_ts` | DATETIME | No | — | First timestamp in train slice |
+| `train_end_ts` | DATETIME | No | — | Last timestamp in train slice |
+| `coefficients_json` | TEXT | No | — | Full `theta` coefficient vector serialized as JSON array |
+| `input_cols_json` | TEXT | No | — | JSON array of input column names used |
+| `output_col` | VARCHAR(100) | No | `'Soil_Moisture'` | Output variable modeled |
+| `rmse_train` | FLOAT | Yes | NULL | One-step RMSE on the train slice |
+| `rmse_val` | FLOAT | Yes | NULL | One-step RMSE on the validation slice |
+| `mae_train` | FLOAT | Yes | NULL | One-step MAE on the train slice |
+| `mae_val` | FLOAT | Yes | NULL | One-step MAE on the validation slice |
+| `artifact_path` | VARCHAR(512) | Yes | NULL | Optional filesystem path to saved `.json` artifact file |
+| `created_at` | DATETIME | No | `NOW()` | — |
+
+**Indexes**: PRIMARY KEY (`id`), UNIQUE KEY `uq_artifact_run` (`run_id`)
+
+---
+
+## Table: `pipeline_cycles`
+
+One row per processed time step within a run. The core data table. Every filtered value is traceable back to its raw measurement, ARX prediction, Kalman internals, adaptive status, and configuration via `run_id`.
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| `id` | BIGINT AUTO_INCREMENT | No | — | Primary key |
+| `run_id` | INT | No | — | FK → `experiment_runs.id` |
+| `sample_ts` | DATETIME | No | — | Source timestamp from dataset; Django `DateTimeField` maps to DATETIME without explicit sub-second precision |
+| `cycle_index` | INT | No | — | Sequential 0-based index within the run |
+| `slice_type` | VARCHAR(15) | No | — | Django choices: `train`, `validation`, `test` |
+| `source_type` | VARCHAR(20) | No | `'csv_replay'` | Django choices: `csv_replay`, `mysql_replay`, `live` |
+| **Raw measurements** | | | | |
+| `raw_soil_moisture` | FLOAT | Yes | NULL | Raw `Soil_Moisture` from source |
+| `raw_temperature` | FLOAT | Yes | NULL | Raw `Temperature` |
+| `raw_humidity` | FLOAT | Yes | NULL | Raw `Humidity` |
+| `raw_light` | FLOAT | Yes | NULL | Raw `Light` |
+| `raw_drip` | FLOAT | Yes | NULL | Raw `Drip` actuator signal |
+| `raw_mist` | FLOAT | Yes | NULL | Raw `Mist` actuator signal |
+| `raw_fan` | FLOAT | Yes | NULL | Raw `Fan` actuator signal |
+| **Preprocessing** | | | | |
+| `preprocess_status` | VARCHAR(20) | No | `'valid'` | Django choices: `valid`, `interpolated`, `kept_last`, `skipped`, `invalid` |
+| **ARX prediction** | | | | |
+| `arx_predicted` | FLOAT | Yes | NULL | ARX next-step prediction for `Soil_Moisture`; NULL if prediction skipped |
+| **Kalman internals** | | | | |
+| `kf_x_prior` | FLOAT | Yes | NULL | Prior estimate `x^-_k` before measurement update |
+| `kf_P_prior` | FLOAT | Yes | NULL | Prior covariance `P^-_k` before measurement update |
+| `kf_innovation` | FLOAT | Yes | NULL | Innovation `e_k = z_k - x^-_k` |
+| `kf_R` | FLOAT | Yes | NULL | Adaptive `R_k` used at this step |
+| `kf_K` | FLOAT | Yes | NULL | Kalman gain `K_k` |
+| `kf_x_posterior` | FLOAT | Yes | NULL | Filtered estimate `x_k` after update |
+| `kf_P_posterior` | FLOAT | Yes | NULL | Updated covariance `P_k` after update |
+| **Cycle status** | | | | |
+| `cycle_status` | VARCHAR(30) | No | `'ok'` | Django choices: `ok`, `skipped_no_measurement`, `skipped_invalid`, `error` |
+| `error_message` | VARCHAR(512) | Yes | NULL | Short error description if `cycle_status = 'error'` |
+| `created_at` | DATETIME | No | `NOW()` | Row insertion time |
+
+**Constraints / Indexes**:
+- PRIMARY KEY (`id`)
+- UNIQUE `uq_cycles_run_index` (`run_id`, `cycle_index`) — one cycle per index per run; also serves as the sequential-replay index
+- INDEX `idx_cycles_run_ts` (`run_id`, `sample_ts`) — time-series retrieval per run
+- INDEX `idx_cycles_run_slice` (`run_id`, `slice_type`) — slice-level queries and metrics
+
+> **Note on column types**: `slice_type`, `source_type`, `preprocess_status`, and `cycle_status` are stored as `VARCHAR` with Django-level choice validation, not native MySQL `ENUM`. This keeps migrations simple and avoids MySQL ENUM migration pain. Choice values are enforced at the ORM layer.
+
+---
+
+## Table: `evaluation_summaries`
+
+Aggregated metrics per run per slice. Written once after the held-out replay completes. The `test` slice row is the official acceptance gate.
+
+| Column | Type | Nullable | Default | Notes |
+|--------|------|----------|---------|-------|
+| `id` | INT AUTO_INCREMENT | No | — | Primary key |
+| `run_id` | INT | No | — | FK → `experiment_runs.id` |
+| `slice_type` | VARCHAR(15) | No | — | Django choices: `train`, `validation`, `test` |
+| `n_samples` | INT | No | — | Total time steps in slice |
+| `n_valid` | INT | No | — | Cycles with `cycle_status = 'ok'` |
+| `n_skipped` | INT | No | — | Cycles where measurement update was skipped |
+| `n_error` | INT | No | — | Cycles with `cycle_status = 'error'` |
+| **ARX accuracy** | | | | |
+| `rmse_arx` | FLOAT | Yes | NULL | RMSE of `arx_predicted` vs `raw_soil_moisture` |
+| `mae_arx` | FLOAT | Yes | NULL | MAE of `arx_predicted` vs `raw_soil_moisture` |
+| **Kalman accuracy** | | | | |
+| `rmse_filtered` | FLOAT | Yes | NULL | RMSE of `kf_x_posterior` vs `raw_soil_moisture` |
+| `mae_filtered` | FLOAT | Yes | NULL | MAE of `kf_x_posterior` vs `raw_soil_moisture` |
+| **Good-enough metrics (ADR-003)** | | | | |
+| `var_diff_raw` | FLOAT | Yes | NULL | `var(diff(raw_soil_moisture))` — variance of raw first differences |
+| `var_diff_filtered` | FLOAT | Yes | NULL | `var(diff(kf_x_posterior))` — variance of filtered first differences |
+| `variance_reduction` | FLOAT | Yes | NULL | `1 - var_diff_filtered / var_diff_raw`; must be >= 0.20 on test slice |
+| `rmse_ratio` | FLOAT | Yes | NULL | `rmse_filtered / rmse_arx`; must be <= 1.05 on test slice |
+| `mae_ratio` | FLOAT | Yes | NULL | `mae_filtered / mae_arx`; must be <= 1.05 on test slice |
+| **Innovation and adaptive R diagnostics** | | | | |
+| `innovation_mean` | FLOAT | Yes | NULL | Mean of `kf_innovation` |
+| `innovation_std` | FLOAT | Yes | NULL | Std dev of `kf_innovation` |
+| `innovation_max_abs` | FLOAT | Yes | NULL | Max absolute innovation (saturation check) |
+| `R_mean` | FLOAT | Yes | NULL | Mean adaptive `R` over slice |
+| `R_min_observed` | FLOAT | Yes | NULL | Min observed `R` |
+| `R_max_observed` | FLOAT | Yes | NULL | Max observed `R` |
+| `P_mean` | FLOAT | Yes | NULL | Mean posterior covariance `P` |
+| `P_max` | FLOAT | Yes | NULL | Max posterior covariance (explosion check) |
+| **Pass/fail flags** | | | | |
+| `pass_variance_reduction` | TINYINT(1) | Yes | NULL | 1 if `variance_reduction >= 0.20` |
+| `pass_rmse_guardrail` | TINYINT(1) | Yes | NULL | 1 if `rmse_ratio <= 1.05` |
+| `pass_mae_guardrail` | TINYINT(1) | Yes | NULL | 1 if `mae_ratio <= 1.05` |
+| `created_at` | DATETIME | No | `NOW()` | — |
+
+**Indexes**:
+- PRIMARY KEY (`id`)
+- UNIQUE KEY `uq_eval_run_slice` (`run_id`, `slice_type`)
+
+---
+
+## Relationships Summary
+
+```text
+experiment_runs.id  <──  experiment_configs.run_id   (1:1)
+experiment_runs.id  <──  arx_artifacts.run_id         (1:1)
+experiment_runs.id  <──  pipeline_cycles.run_id        (1:N)
+experiment_runs.id  <──  evaluation_summaries.run_id   (1:3 max)
+```
+
+All foreign keys use `ON DELETE CASCADE` so deleting a run removes all its associated data.
+
+---
+
+## Query Patterns
+
+### Replay all cycles for a run in order
+
+```sql
+SELECT cycle_index, sample_ts,
+       raw_soil_moisture, arx_predicted,
+       kf_x_posterior, kf_innovation, kf_R, kf_P_posterior,
+       preprocess_status, cycle_status
+FROM pipeline_cycles
+WHERE run_id = %s
+ORDER BY cycle_index ASC;
+```
+
+### Get test-slice cycles for dashboard/plot
+
+```sql
+SELECT sample_ts,
+       raw_soil_moisture, arx_predicted, kf_x_posterior,
+       kf_innovation, kf_R, kf_P_posterior,
+       preprocess_status, cycle_status
+FROM pipeline_cycles
+WHERE run_id = %s AND slice_type = 'test'
+ORDER BY sample_ts ASC;
+```
+
+### Check acceptance gate for the test slice
+
+```sql
+SELECT variance_reduction, rmse_ratio, mae_ratio,
+       pass_variance_reduction, pass_rmse_guardrail, pass_mae_guardrail
+FROM evaluation_summaries
+WHERE run_id = %s AND slice_type = 'test';
+```
+
+### List all completed runs with their test-slice metrics
+
+```sql
+SELECT r.id, r.name, r.completed_at,
+       e.variance_reduction, e.rmse_ratio, e.mae_ratio,
+       e.pass_variance_reduction, e.pass_rmse_guardrail, e.pass_mae_guardrail
+FROM experiment_runs r
+LEFT JOIN evaluation_summaries e ON e.run_id = r.id AND e.slice_type = 'test'
+WHERE r.status = 'completed'
+ORDER BY r.completed_at DESC;
+```
+
+---
+
+## Migration Notes
+
+- All tables use `utf8mb4` charset.
+- `pipeline_cycles.sample_ts` uses `DATETIME`; Django `DateTimeField` does not request explicit sub-second precision. If millisecond precision is required later, add a custom DDL migration.
+- Django migrations live in `backend/estimation/migrations/`.
+- First migration: `0001_initial.py` — creates all five tables.
+- Do not use `CASCADE DELETE` in production before confirming that run data is exported/backed up.
+
+---
+
+## Open Items
+
+| Item | Owner | Status |
+|------|-------|--------|
+| AMPC-ready derived columns (`Dr`, `ETc`, `ET0`) | task #013 | Deferred; add in a later migration once #013 finalizes the control-state contract |
+| Live sensor multi-source schema extension | task #010 | Deferred; `source_type` column is already present for forward compatibility |
+| CSV export stored procedure or management command | task #008 | Planned as part of evaluation/report export |
+
+---
+
+## Changelog
+
+| Date | Author | Change |
+|------|--------|--------|
+| 2026-04-13 | Codex | Initial placeholder schema overview created during onboarding |
+| 2026-04-14 | Codex | Full schema designed for task #002: five tables, all columns, indexes, query patterns, storage decision, and open items |
