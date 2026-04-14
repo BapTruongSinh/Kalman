@@ -605,6 +605,184 @@ class TestMatplotlibLazyImport:
         assert any("matplotlib" in str(warning.message).lower() for warning in w)
 
 
+# ── TestExportPlotsHappyPath ───────────────────────────────────────────────────
+
+
+@pytest.mark.django_db
+class TestExportPlotsHappyPath:
+    """exercise export_plots() happy-path with mocked matplotlib.
+
+    The current environment has a numpy/matplotlib ABI mismatch, so we inject
+    mock modules into sys.modules before each test.  This lets us verify all
+    branching logic (file-path generation, residuals guard, multi-slice) without
+    needing a working C extension stack.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _inject_mock_mpl(self, monkeypatch):
+        """Inject stub matplotlib into sys.modules for every test in this class.
+
+        ``import matplotlib.pyplot as plt`` inside export_plots() compiles to
+        IMPORT_NAME + IMPORT_FROM, where IMPORT_FROM does
+        ``getattr(matplotlib_module, "pyplot")``.  Injecting only
+        ``sys.modules["matplotlib.pyplot"]`` is therefore not enough — we must
+        also set ``fake_mpl.pyplot = fake_plt`` so the attribute lookup
+        returns our mock rather than an auto-generated MagicMock.
+        """
+        import sys
+        from unittest.mock import MagicMock
+
+        fake_mpl = MagicMock(name="matplotlib")
+        fake_plt = MagicMock(name="matplotlib.pyplot")
+        fake_mdates = MagicMock(name="matplotlib.dates")
+        fake_fig = MagicMock(name="Figure")
+        fake_ax = MagicMock(name="Axes")
+        fake_ax.xaxis = MagicMock(name="XAxis")
+        fake_plt.subplots.return_value = (fake_fig, fake_ax)
+
+        # savefig creates the real file so returned Path objects are valid
+        def _touch(path, **kwargs):
+            Path(path).touch()
+
+        fake_fig.savefig.side_effect = _touch
+
+        # IMPORTANT: set attributes on fake_mpl so that IMPORT_FROM finds our mocks
+        fake_mpl.pyplot = fake_plt
+        fake_mpl.dates = fake_mdates
+
+        # Also register in sys.modules so bare "import matplotlib" finds our fake
+        monkeypatch.setitem(sys.modules, "matplotlib", fake_mpl)
+        monkeypatch.setitem(sys.modules, "matplotlib.pyplot", fake_plt)
+        monkeypatch.setitem(sys.modules, "matplotlib.dates", fake_mdates)
+
+        # Expose on self so individual tests can assert call counts
+        self._fake_plt = fake_plt
+        self._fake_fig = fake_fig
+
+    # ── basic coverage ─────────────────────────────────────────────────────────
+
+    def test_empty_run_returns_empty_list(self, run, tmp_path):
+        from estimation.evaluation.reporter import export_plots
+
+        assert export_plots(run.pk, tmp_path) == []
+
+    def test_single_slice_full_data_returns_four_files(
+        self, run, cycle_factory, tmp_path
+    ):
+        from estimation.evaluation.reporter import export_plots
+
+        for i in range(5):
+            cycle_factory(slice_type="test", index=i)
+
+        result = export_plots(run.pk, tmp_path)
+        names = {p.name for p in result}
+        assert "time_series_test.png" in names
+        assert "innovation_test.png" in names
+        assert "adaptive_R_test.png" in names
+        assert "residuals_test.png" in names
+        assert len(result) == 4
+
+    def test_returned_paths_are_inside_output_dir(self, run, cycle_factory, tmp_path):
+        from estimation.evaluation.reporter import export_plots
+
+        for i in range(3):
+            cycle_factory(slice_type="train", index=i)
+
+        result = export_plots(run.pk, tmp_path)
+        for p in result:
+            assert p.parent == tmp_path
+
+    def test_output_dir_created_if_not_exists(self, run, cycle_factory, tmp_path):
+        from estimation.evaluation.reporter import export_plots
+
+        nested = tmp_path / "a" / "b" / "c"
+        assert not nested.exists()
+        cycle_factory(slice_type="test", index=0)
+        export_plots(run.pk, nested)
+        assert nested.is_dir()
+
+    # ── residuals branch ────────────────────────────────────────────────────────
+
+    def test_no_paired_data_skips_residuals_plot(self, run, cycle_factory, tmp_path):
+        from estimation.evaluation.reporter import export_plots
+
+        for i in range(3):
+            cycle_factory(slice_type="train", index=i, raw_sm=None, kf_post=None)
+
+        result = export_plots(run.pk, tmp_path)
+        names = {p.name for p in result}
+        assert "time_series_train.png" in names
+        assert "residuals_train.png" not in names
+        assert len(result) == 3  # 3 plots, not 4
+
+    def test_mixed_null_and_valid_pair_shows_residuals(
+        self, run, cycle_factory, tmp_path
+    ):
+        from estimation.evaluation.reporter import export_plots
+
+        # row 0: NULL raw — not a valid pair, excluded from residuals
+        cycle_factory(slice_type="test", index=0, raw_sm=None, kf_post=51.8)
+        # row 1: finite pair — residuals list is non-empty → residuals plot
+        cycle_factory(slice_type="test", index=1, raw_sm=52.0, kf_post=51.8)
+
+        result = export_plots(run.pk, tmp_path)
+        names = {p.name for p in result}
+        # Residuals plot must appear because row 1 is a valid pair
+        assert "residuals_test.png" in names
+
+    def test_all_null_kf_post_skips_residuals(self, run, cycle_factory, tmp_path):
+        from estimation.evaluation.reporter import export_plots
+
+        # All kf_x_posterior values are NULL → no valid raw/filtered pair
+        for i in range(3):
+            cycle_factory(slice_type="train", index=i, raw_sm=50.0 + i, kf_post=None)
+
+        result = export_plots(run.pk, tmp_path)
+        names = {p.name for p in result}
+        assert "residuals_train.png" not in names
+
+    # ── multi-slice ─────────────────────────────────────────────────────────────
+
+    def test_all_three_slices_generate_files(self, run, cycle_factory, tmp_path):
+        from estimation.evaluation.reporter import export_plots
+
+        # Use non-overlapping index ranges: (run, cycle_index) must be unique
+        for i in range(3):
+            cycle_factory(slice_type="train", index=i)        # 0-2
+        for i in range(3):
+            cycle_factory(slice_type="validation", index=i + 3)  # 3-5
+        for i in range(3):
+            cycle_factory(slice_type="test", index=i + 6)        # 6-8
+
+        result = export_plots(run.pk, tmp_path)
+        # each slice should have ≥ 3 plots (time-series, innovation, R, maybe residuals)
+        assert len(result) >= 9
+
+    def test_only_slices_with_rows_get_plots(self, run, cycle_factory, tmp_path):
+        from estimation.evaluation.reporter import export_plots
+
+        for i in range(3):
+            cycle_factory(slice_type="train", index=i)
+        # validation and test have no rows
+
+        result = export_plots(run.pk, tmp_path)
+        names = {p.name for p in result}
+        assert any("train" in n for n in names)
+        assert not any("validation" in n for n in names)
+        assert not any("test" in n for n in names)
+
+    # ── savefig call-count ──────────────────────────────────────────────────────
+
+    def test_savefig_called_once_per_returned_file(self, run, cycle_factory, tmp_path):
+        from estimation.evaluation.reporter import export_plots
+
+        for i in range(3):
+            cycle_factory(slice_type="test", index=i)
+
+        result = export_plots(run.pk, tmp_path)
+        assert self._fake_fig.savefig.call_count == len(result)
+
+
 # ── TestSliceMetricsProperties ─────────────────────────────────────────────────
 
 class TestSliceMetricsProperties:

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import textwrap
 from pathlib import Path
 from typing import Optional
@@ -523,6 +524,7 @@ def export_plots(run_pk: int, output_dir: "Path | str") -> list[Path]:
             r - k
             for r, k in zip(raw, kf)
             if r is not None and k is not None
+            and math.isfinite(r) and math.isfinite(k)
         ]
         if residuals:
             fig, ax = plt.subplots(figsize=(6, 4))
