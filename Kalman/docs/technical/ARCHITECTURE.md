@@ -129,6 +129,98 @@ This section remains a template until the Django/backend implementation begins.
 
 ---
 
+## Prediction Adapter Contract
+
+The prediction layer is deliberately separated from the Kalman estimator by an
+abstract interface.  This keeps model choice decoupled from estimator code and
+allows future adapters (LightGBM, XGBoost, LSTM, …) to slot in without touching
+any downstream code.
+
+### Interface (`estimation.prediction`)
+
+```python
+# estimation/prediction/base.py
+
+class PredictionAdapter(ABC):
+    @property @abstractmethod
+    def model_kind(self) -> str: ...          # "arx", "lightgbm", …
+
+    @property @abstractmethod
+    def is_trained(self) -> bool: ...
+
+    @property @abstractmethod
+    def min_history_len(self) -> int: ...     # records required for one prediction
+
+    @abstractmethod
+    def train(
+        self,
+        records: Sequence[ProcessedRecord],
+        *,
+        val_records: Sequence[ProcessedRecord] | None = None,
+    ) -> dict[str, object]: ...              # summary incl. train/val metrics
+
+    @abstractmethod
+    def predict(self, inp: PredictionInput) -> PredictionResult: ...
+
+    @abstractmethod
+    def save_artifact(self, path: Path) -> None: ...
+
+    @classmethod @abstractmethod
+    def load_artifact(cls, path: Path) -> "PredictionAdapter": ...
+```
+
+**`PredictionInput`** — mutable dataclass wrapping `list[ProcessedRecord]`.
+Callers populate `history` with the window of recent preprocessed records.
+
+**`PredictionResult`** — frozen dataclass with fields:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `value` | `float \| None` | Predicted next-step `Soil_Moisture`; `None` when unavailable |
+| `status` | `str` | `"ok"`, `"unavailable"`, or `"error"` |
+| `model_kind` | `str` | Mirrors `adapter.model_kind` |
+| `reason` | `str` | Human-readable explanation when not `"ok"` |
+
+`predict()` **never raises** — all error conditions are surfaced through
+`status="error"` / `status="unavailable"` so the Kalman estimator can always
+decide whether to proceed with a measurement-only update.
+
+### v1 Baseline — ARX (OLS)
+
+`ARXPredictionAdapter` implements the contract using an offline OLS-fitted
+ARX(*na*, *nb*, *nk*) model.  Default orders: *na* = 2, *nb* = 2, *nk* = 1.
+
+Training constructs the regression matrix from `ProcessedRecord` arrays and
+solves via `numpy.linalg.lstsq`.  Training summary includes RMSE, MAE, R²,
+and optional validation-slice metrics.
+
+Artifacts are persisted as JSON and can be loaded back with
+`ARXPredictionAdapter.load_artifact(path)`.  The loader also handles the
+legacy format produced by `../ARX/arx_pipeline.py`, including the
+`best_candidate` envelope.
+
+Public module exports:
+
+```python
+from estimation.prediction import (
+    PredictionInput,
+    PredictionResult,
+    PredictionAdapter,
+    ARXTrainConfig,
+    ARXPredictionAdapter,
+)
+```
+
+### Extending with a New Adapter
+
+1. Subclass `PredictionAdapter`.
+2. Implement all six abstract members.
+3. Keep `model_kind` a stable slug (e.g. `"lightgbm"`).
+4. Ensure `predict()` never raises.
+5. Register the adapter in the run-configuration (task #008).
+
+---
+
 ## AMPC-Ready Modeling Boundary
 
 The AMPC controller is not the first implementation target, but the architecture must preserve these contracts:
