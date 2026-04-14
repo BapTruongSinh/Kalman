@@ -206,9 +206,14 @@ class TestKalmanConfig:
         with pytest.raises(ValueError, match="P0 must be > 0"):
             KalmanConfig(P0=-1.0)
 
-    def test_Q_zero_raises(self):
-        with pytest.raises(ValueError, match="Q must be > 0"):
-            KalmanConfig(Q=0.0)
+    def test_Q_zero_is_valid(self):
+        """Q=0 is physically valid (no process noise) and must not raise."""
+        cfg = KalmanConfig(Q=0.0)
+        assert cfg.Q == 0.0
+
+    def test_Q_negative_raises(self):
+        with pytest.raises(ValueError, match="Q must be >= 0"):
+            KalmanConfig(Q=-0.01)
 
     def test_R0_zero_raises(self):
         with pytest.raises(ValueError, match="R0 must be > 0"):
@@ -245,6 +250,31 @@ class TestKalmanConfig:
     def test_alpha_boundary_values_ok(self):
         KalmanConfig(alpha=0.0)
         KalmanConfig(alpha=1.0)
+
+    # ── Non-finite value rejection ────────────────────────────────────────────
+    # NaN comparisons (NaN > 0.0 == False) would silently pass all bound checks
+    # and propagate into the filter state.  Every float field must be finite.
+
+    @pytest.mark.parametrize("field,value", [
+        ("x0", float("nan")),
+        ("x0", float("inf")),
+        ("x0", float("-inf")),
+        ("P0", float("nan")),
+        ("P0", float("inf")),
+        ("Q", float("nan")),
+        ("Q", float("inf")),
+        ("R0", float("nan")),
+        ("R0", float("inf")),
+        ("R_min", float("nan")),
+        ("R_min", float("inf")),
+        ("R_max", float("nan")),
+        ("R_max", float("inf")),
+        ("alpha", float("nan")),
+        ("alpha", float("inf")),
+    ])
+    def test_non_finite_field_raises(self, field: str, value: float):
+        with pytest.raises(ValueError, match="must be finite"):
+            KalmanConfig(**{field: value})
 
     def test_config_is_frozen(self, default_config: KalmanConfig):
         with pytest.raises(Exception):
@@ -748,6 +778,50 @@ class TestNeverRaises:
             pytest.fail(f"step(BadPreprocess()) raised: {exc}")
         assert result.cycle_status == "error"
         assert math.isfinite(result.x_posterior)
+
+    def test_step_with_wrong_typed_timestamp_falls_back_to_epoch(self):
+        """If record.raw.timestamp is not a datetime, error result must use _EPOCH."""
+
+        class RawWithBadTimestamp:
+            timestamp = "not-a-datetime"
+            soil_moisture = None
+
+        class BadTypedRecord:
+            raw = RawWithBadTimestamp()
+            preprocess_status = "valid"
+
+        from datetime import timezone as _tz
+
+        cfg = KalmanConfig(x0=60.0)
+        est = AdaptiveKalmanCycle(cfg)
+        try:
+            result = est.step(BadTypedRecord(), cycle_index=0)  # type: ignore[arg-type]
+        except Exception as exc:
+            pytest.fail(f"step(BadTypedRecord()) raised: {exc}")
+        assert result.cycle_status == "error"
+        # timestamp must have been replaced by the epoch sentinel, not the raw string
+        assert result.timestamp.tzinfo == _tz.utc
+        assert result.timestamp.year == 1970
+
+    def test_step_with_wrong_typed_soil_moisture_falls_back_to_none(self):
+        """If record.raw.soil_moisture is a string, error result must coerce to None."""
+
+        class RawWithBadSM:
+            timestamp = None  # also falls back to epoch
+            soil_moisture = "not-a-float"
+
+        class BadSMRecord:
+            raw = RawWithBadSM()
+            preprocess_status = "valid"
+
+        cfg = KalmanConfig(x0=60.0)
+        est = AdaptiveKalmanCycle(cfg)
+        try:
+            result = est.step(BadSMRecord(), cycle_index=0)  # type: ignore[arg-type]
+        except Exception as exc:
+            pytest.fail(f"step(BadSMRecord()) raised: {exc}")
+        assert result.cycle_status == "error"
+        assert result.raw_soil_moisture is None
 
 
 # ── TestRealData ──────────────────────────────────────────────────────────────

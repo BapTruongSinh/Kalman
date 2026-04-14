@@ -34,6 +34,7 @@ Design constraints
 from __future__ import annotations
 
 import logging
+import math
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -99,10 +100,24 @@ class KalmanConfig:
     alpha: float = 0.95
 
     def __post_init__(self) -> None:
+        # All floats must be finite before any bound check so that NaN/Inf cannot
+        # pass silently (comparison NaN > 0.0 evaluates False in Python, meaning
+        # every bound check would pass and NaN would propagate into the filter).
+        for _field, _val in (
+            ("x0", self.x0),
+            ("P0", self.P0),
+            ("Q", self.Q),
+            ("R0", self.R0),
+            ("R_min", self.R_min),
+            ("R_max", self.R_max),
+            ("alpha", self.alpha),
+        ):
+            if not math.isfinite(_val):
+                raise ValueError(f"{_field} must be finite, got {_val!r}")
         if self.P0 <= 0.0:
             raise ValueError(f"P0 must be > 0, got {self.P0!r}")
-        if self.Q <= 0.0:
-            raise ValueError(f"Q must be > 0, got {self.Q!r}")
+        if self.Q < 0.0:
+            raise ValueError(f"Q must be >= 0, got {self.Q!r}")
         if self.R0 <= 0.0:
             raise ValueError(f"R0 must be > 0, got {self.R0!r}")
         if not (0.0 < self.R_min < self.R_max):
@@ -325,9 +340,16 @@ class AdaptiveKalmanCycle:
             # _safe_getattr wraps getattr in try/except so descriptor/property
             # exceptions (BadRaw.raw raises RuntimeError, etc.) cannot escape.
             _raw = _safe_getattr(record, "raw", None)
-            _ts: datetime = _safe_getattr(_raw, "timestamp", _EPOCH)  # type: ignore[assignment]
-            _raw_sm: float | None = _safe_getattr(_raw, "soil_moisture", None)  # type: ignore[assignment]
-            _pre_status: str = _safe_getattr(record, "preprocess_status", "invalid")  # type: ignore[assignment]
+            _ts_raw = _safe_getattr(_raw, "timestamp", _EPOCH)
+            _ts: datetime = _ts_raw if isinstance(_ts_raw, datetime) else _EPOCH
+            _sm_raw = _safe_getattr(_raw, "soil_moisture", None)
+            _raw_sm: float | None = (
+                float(_sm_raw)
+                if isinstance(_sm_raw, (int, float)) and math.isfinite(float(_sm_raw))
+                else None
+            )
+            _ps_raw = _safe_getattr(record, "preprocess_status", "invalid")
+            _pre_status: str = _ps_raw if isinstance(_ps_raw, str) else "invalid"
             # State is NOT mutated in the error branch — keep last known good values.
             result = CycleResult(
                 timestamp=_ts,

@@ -5,7 +5,7 @@ Public API
 ----------
 ``KalmanConfig``           — frozen hyperparameter set (ADR-003 defaults)
 ``KalmanState``            — mutable filter state carried between steps
-``CycleResult``            — per-step output; mirrors ``PipelineCycle`` model fields
+``CycleResult``            — per-step output; contains the Kalman subset needed to populate ``PipelineCycle``
 ``AdaptiveKalmanCycle``    — scalar Soil_Moisture estimator with bounded adaptive R
 """
 

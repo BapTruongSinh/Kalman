@@ -272,7 +272,7 @@ from estimation.kalman import (
 | `x_posterior` | `float` | Filtered state estimate |
 | `P_posterior` | `float` | Posterior error covariance |
 | `cycle_status` | `str` | `"ok"` / `"skipped_no_measurement"` / `"error"` |
-| `adaptive_status` | `str` | `"updated"` / `"unchanged"` / `"clamped"` |
+| `adaptive_status` | `str` | `"R_updated"` (measurement processed) / `"R_skipped"` (no measurement) / `"skipped"` (error branch) |
 | `latency_ms` | `float \| None` | Wall-clock time for this cycle |
 | `error_message` | `str \| None` | Populated on `"error"` status only |
 
