@@ -11,7 +11,31 @@ LiveIngestResponseSerializer — documents the 201 response shape.
 
 from __future__ import annotations
 
+import math
+
 from rest_framework import serializers
+
+# Sensor channel names that need non-finite guard.
+_SENSOR_CHANNELS = (
+    "soil_moisture",
+    "temperature",
+    "humidity",
+    "light",
+    "drip",
+    "mist",
+    "fan",
+)
+
+
+def _validate_finite_or_null(value: float | None, field_name: str) -> float | None:
+    """Return *value* unchanged, or raise ValidationError for NaN / Inf."""
+    if value is None:
+        return None
+    if not math.isfinite(value):
+        raise serializers.ValidationError(
+            f"{field_name} must be a finite number; got {value!r}."
+        )
+    return value
 
 
 class LiveSampleSerializer(serializers.Serializer):
@@ -30,6 +54,10 @@ class LiveSampleSerializer(serializers.Serializer):
     ------------------------
     All sensor channels accept ``null`` — the Kalman filter will skip the
     measurement-update step when ``soil_moisture`` is absent or invalid.
+
+    Non-finite values (NaN, Infinity, -Infinity) are rejected with 400 Bad
+    Request.  MySQL cannot store them and allowing them through would produce a
+    500 at save time.
     """
 
     run_id = serializers.IntegerField(
@@ -44,7 +72,7 @@ class LiveSampleSerializer(serializers.Serializer):
         allow_null=True,
         required=False,
         default=None,
-        help_text="Soil moisture reading (%).",
+        help_text="Soil moisture reading (%). Must be finite or null.",
     )
     # Ancillary channels (stored for traceability; not used by Kalman directly)
     temperature = serializers.FloatField(allow_null=True, required=False, default=None)
@@ -53,6 +81,29 @@ class LiveSampleSerializer(serializers.Serializer):
     drip = serializers.FloatField(allow_null=True, required=False, default=None)
     mist = serializers.FloatField(allow_null=True, required=False, default=None)
     fan = serializers.FloatField(allow_null=True, required=False, default=None)
+
+    # ── Per-field finite guards ────────────────────────────────────────────────
+
+    def validate_soil_moisture(self, value: float | None) -> float | None:
+        return _validate_finite_or_null(value, "soil_moisture")
+
+    def validate_temperature(self, value: float | None) -> float | None:
+        return _validate_finite_or_null(value, "temperature")
+
+    def validate_humidity(self, value: float | None) -> float | None:
+        return _validate_finite_or_null(value, "humidity")
+
+    def validate_light(self, value: float | None) -> float | None:
+        return _validate_finite_or_null(value, "light")
+
+    def validate_drip(self, value: float | None) -> float | None:
+        return _validate_finite_or_null(value, "drip")
+
+    def validate_mist(self, value: float | None) -> float | None:
+        return _validate_finite_or_null(value, "mist")
+
+    def validate_fan(self, value: float | None) -> float | None:
+        return _validate_finite_or_null(value, "fan")
 
 
 class LiveIngestResponseSerializer(serializers.Serializer):

@@ -188,6 +188,64 @@ def validate_record(
     return ValidationResult(is_valid=True, status="valid")
 
 
+def validate_live_record(
+    record: RawRecord,
+    config: ValidationConfig = DEFAULT_CONFIG,
+) -> ValidationResult:
+    """Validate a single live sensor record with relaxed missing-value rules.
+
+    Unlike :func:`validate_record`, which requires **all** numeric fields to be
+    present (reflecting the offline CSV contract), this function treats ancillary
+    channels (temperature, humidity, light, drip, mist, fan) as optional.
+
+    Rules
+    -----
+    * A field that is ``None`` is simply skipped — no ``"missing"`` error.
+    * A field that IS present must be finite and within the configured physical
+      bounds; otherwise the record is ``"out_of_range"``.
+    * ``soil_moisture`` receives the same treatment as all other fields: when
+      absent (``None``) the record is still considered ``"valid"`` but the
+      Kalman measurement-update step will be skipped (``preprocess_status``
+      will be ``"skipped"`` from :func:`~preprocessor.preprocess_single`).
+
+    This function intentionally does **not** perform suspicious-repeat
+    detection — a live path typically has no preceding history at hand.
+
+    Parameters
+    ----------
+    record:
+        Live sensor record to validate.
+    config:
+        Physical bounds.  Defaults to :data:`DEFAULT_CONFIG`.
+
+    Returns
+    -------
+    ValidationResult
+        ``is_valid=True`` when all *present* fields are finite and in-range.
+    """
+    out_of_range = []
+    for attr, min_attr, max_attr in _RANGE_CHECKS:
+        val = getattr(record, attr)
+        if val is None:
+            continue  # absent ancillary field — acceptable for live
+        if not math.isfinite(val):
+            out_of_range.append(f"{attr} is non-finite ({val!r})")
+            continue
+        lo: float = getattr(config, min_attr)
+        hi: float = getattr(config, max_attr)
+        if not (lo <= val <= hi):
+            out_of_range.append(f"{attr}={val:.4g} not in [{lo}, {hi}]")
+
+    if out_of_range:
+        return ValidationResult(
+            is_valid=False,
+            status="out_of_range",
+            reason="; ".join(out_of_range),
+        )
+
+    return ValidationResult(is_valid=True, status="valid")
+
+
 def validate_batch(
     records: Sequence[RawRecord],
     config: ValidationConfig = DEFAULT_CONFIG,

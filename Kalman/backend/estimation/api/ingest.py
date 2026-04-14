@@ -55,7 +55,7 @@ from rest_framework.views import APIView
 from ..ingestion.loader import RawRecord
 from ..ingestion.preprocessor import preprocess_single
 from ..ingestion.validator import DEFAULT_CONFIG as DEFAULT_VALIDATION_CONFIG
-from ..ingestion.validator import validate_record
+from ..ingestion.validator import validate_live_record
 from ..kalman import AdaptiveKalmanCycle
 from ..kalman.cycle import KalmanConfig, KalmanState
 from ..models import ExperimentConfig, ExperimentRun, PipelineCycle
@@ -218,8 +218,10 @@ class LiveIngestView(APIView):
         data = serializer.validated_data
         run_id: int = data["run_id"]
 
-        # ── Load and guard the run ────────────────────────────────────────────
+        # ── Guard the run (outside transaction — read-only check) ─────────────
         try:
+            # select_for_update used later inside the atomic block; here we
+            # just check existence and type without locking.
             run = ExperimentRun.objects.select_related("config").get(
                 pk=run_id,
                 run_type=ExperimentRun.RunType.LIVE,
@@ -241,7 +243,7 @@ class LiveIngestView(APIView):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        # ── Load Kalman config ────────────────────────────────────────────────
+        # ── Load Kalman config (outside transaction — immutable snapshot) ──────
         try:
             kalman_config = _kalman_config_from_db(run.config)
         except ExperimentConfig.DoesNotExist:
@@ -251,32 +253,43 @@ class LiveIngestView(APIView):
             )
             kalman_config = KalmanConfig()
 
-        # ── Reconstruct filter state from last persisted cycle ────────────────
-        last_cycle: PipelineCycle | None = (
-            PipelineCycle.objects.filter(run=run).order_by("-cycle_index").first()
-        )
-        state, cycle_index = _restore_state(last_cycle, kalman_config)
-
-        # ── Validate + preprocess the incoming sample ─────────────────────────
-        raw_record = _build_raw_record(data, row_index=cycle_index)
-        validation = validate_record(raw_record, config=DEFAULT_VALIDATION_CONFIG)
-        processed = preprocess_single(raw_record, validation)
-
-        # ── Run one Kalman step ───────────────────────────────────────────────
-        estimator = AdaptiveKalmanCycle(kalman_config)
-        estimator._state = state  # inject reconstructed state
-        cycle_result = estimator.step(processed, cycle_index=cycle_index)
-
-        # ── Persist ───────────────────────────────────────────────────────────
-        cycle_obj = map_result_to_cycle(
-            cycle_result,
-            run,
-            slice_type=PipelineCycle.SliceType.TRAIN,
-            source_type=PipelineCycle.SourceType.LIVE,
-            record=processed,
-        )
-
+        # ── Atomic: lock run row, reconstruct state, validate, step, persist ────
+        # The unique constraint on (run, cycle_index) means two concurrent
+        # requests for the same run could both derive the same next index and
+        # one would raise IntegrityError.  We prevent this by locking the
+        # ExperimentRun row so only one request at a time can enter this block
+        # for a given run.
         with transaction.atomic():
+            # Re-fetch run with a row lock.
+            run = ExperimentRun.objects.select_for_update().get(pk=run_id)
+
+            last_cycle: PipelineCycle | None = (
+                PipelineCycle.objects.filter(run=run).order_by("-cycle_index").first()
+            )
+            state, cycle_index = _restore_state(last_cycle, kalman_config)
+
+            # Build the raw record with the now-known cycle_index.
+            raw_record = _build_raw_record(data, row_index=cycle_index)
+
+            # Use validate_live_record — ancillary fields are optional for
+            # live ingestion; only fields that ARE present are range-checked.
+            # This ensures a minimal payload (run_id + timestamp +
+            # soil_moisture) is accepted and yields preprocess_status="valid"
+            # rather than being silently skipped for missing context channels.
+            validation = validate_live_record(raw_record, config=DEFAULT_VALIDATION_CONFIG)
+            processed = preprocess_single(raw_record, validation)
+
+            estimator = AdaptiveKalmanCycle(kalman_config)
+            estimator._state = state  # inject reconstructed state
+            cycle_result = estimator.step(processed, cycle_index=cycle_index)
+
+            cycle_obj = map_result_to_cycle(
+                cycle_result,
+                run,
+                slice_type=PipelineCycle.SliceType.TRAIN,
+                source_type=PipelineCycle.SourceType.LIVE,
+                record=processed,
+            )
             cycle_obj.save()
 
         logger.info(

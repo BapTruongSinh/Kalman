@@ -8,7 +8,8 @@ Public API
 - :func:`load_csv` — parse greenhouse CSV into :class:`RawRecord` list
 - :func:`split_chronological` — 60/20/20 chronological split
 - :func:`validate_batch` — validate a record sequence (with repeat detection)
-- :func:`validate_record` — validate a single record
+- :func:`validate_record` — validate a single record (offline; all fields required)
+- :func:`validate_live_record` — validate a single live record (ancillary fields optional)
 - :func:`apply_preprocessing` — apply keep_last / interpolate / skip policy
 - :func:`preprocess_single` — skip-policy preprocessing for one live sample
 - :class:`RawRecord` — typed raw data record
@@ -30,7 +31,13 @@ from .preprocessor import (
     apply_preprocessing,
     preprocess_single,
 )
-from .validator import ValidationConfig, ValidationResult, validate_batch, validate_record
+from .validator import (
+    ValidationConfig,
+    ValidationResult,
+    validate_batch,
+    validate_live_record,
+    validate_record,
+)
 
 __all__ = [
     # loader
@@ -40,6 +47,7 @@ __all__ = [
     "DatasetSplit",
     # validator
     "validate_record",
+    "validate_live_record",
     "validate_batch",
     "ValidationResult",
     "ValidationConfig",

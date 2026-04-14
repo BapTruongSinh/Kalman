@@ -9,12 +9,17 @@ Coverage
   completed run → 409.
 * Payload validation: missing run_id → 400; missing timestamp → 400;
   non-numeric sensor value → 400.
+* Non-finite floats (NaN / Infinity / -Infinity) rejected with 400.
 * Invalid (out-of-range) sensor value still accepted → 201 with
   cycle_status="skipped_no_measurement", preprocess_status="skipped".
+* Minimal payload (only soil_moisture) → preprocess_status="valid" (Fix #2).
+* Partial/absent ancillary fields handled correctly by validate_live_record.
 * State reconstruction: second sample uses P/R from first cycle.
 * Reconnect after error cycle: null kf fields reset state from config.
 * No ExperimentConfig → defaults used, still 201.
 * preprocess_single unit tests (offline from Django, pure logic).
+* validate_live_record pure unit tests.
+* _restore_state pure unit tests.
 """
 
 from __future__ import annotations
@@ -431,3 +436,164 @@ def test_restore_state_non_positive_covariance_resets():
     state, idx = _restore_state(_BadCycle(), config)
     assert state.x_post == config.x0  # reset
     assert idx == 3
+
+
+# ── Fix 1: non-finite payload must be rejected at serializer level ─────────────
+
+
+@pytest.mark.django_db
+def test_nan_soil_moisture_returns_400(auth_client, live_run):
+    """'NaN' string parsed by DRF FloatField to float('nan') must be rejected."""
+    payload = {**_VALID_PAYLOAD, "run_id": live_run.pk, "soil_moisture": "NaN"}
+    resp = auth_client.post(_INGEST_URL, payload, format="json")
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_infinity_soil_moisture_returns_400(auth_client, live_run):
+    payload = {**_VALID_PAYLOAD, "run_id": live_run.pk, "soil_moisture": "Infinity"}
+    resp = auth_client.post(_INGEST_URL, payload, format="json")
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_negative_infinity_soil_moisture_returns_400(auth_client, live_run):
+    payload = {**_VALID_PAYLOAD, "run_id": live_run.pk, "soil_moisture": "-Infinity"}
+    resp = auth_client.post(_INGEST_URL, payload, format="json")
+    assert resp.status_code == 400
+
+
+@pytest.mark.django_db
+def test_nan_ancillary_field_returns_400(auth_client, live_run):
+    """Non-finite in any ancillary field should also be rejected."""
+    payload = {**_VALID_PAYLOAD, "run_id": live_run.pk, "temperature": "NaN"}
+    resp = auth_client.post(_INGEST_URL, payload, format="json")
+    assert resp.status_code == 400
+
+
+# ── Fix 2: minimal payload (only soil_moisture provided) must yield valid ───────
+
+
+@pytest.mark.django_db
+def test_minimal_payload_with_valid_sm_returns_valid_status(auth_client, live_run):
+    """Sending only run_id + timestamp + soil_moisture (no ancillary fields) must
+    NOT be skipped; the live validator allows absent ancillary channels."""
+    payload = {
+        "run_id": live_run.pk,
+        "timestamp": "2026-04-14T12:00:00Z",
+        "soil_moisture": 45.3,
+    }
+    resp = auth_client.post(_INGEST_URL, payload, format="json")
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["preprocess_status"] == "valid", (
+        f"Expected 'valid' but got {body['preprocess_status']!r}. "
+        "Absent ancillary fields must not trigger skip policy."
+    )
+    assert body["cycle_status"] == "ok"
+
+
+@pytest.mark.django_db
+def test_partial_ancillary_fields_valid(auth_client, live_run):
+    """Some ancillary fields present, some absent — still valid if in-range."""
+    payload = {
+        "run_id": live_run.pk,
+        "timestamp": "2026-04-14T12:00:00Z",
+        "soil_moisture": 40.0,
+        "temperature": 22.0,   # present and in range
+        # humidity, light, drip, mist, fan — absent
+    }
+    resp = auth_client.post(_INGEST_URL, payload, format="json")
+    assert resp.status_code == 201
+    assert resp.json()["preprocess_status"] == "valid"
+
+
+@pytest.mark.django_db
+def test_ancillary_field_out_of_range_causes_skip(auth_client, live_run):
+    """A present ancillary field that is out of range makes the record invalid
+    (skip policy applied), but the request still returns 201."""
+    payload = {
+        "run_id": live_run.pk,
+        "timestamp": "2026-04-14T12:00:00Z",
+        "soil_moisture": 45.0,
+        "temperature": 999.0,  # wildly out of range
+    }
+    resp = auth_client.post(_INGEST_URL, payload, format="json")
+    assert resp.status_code == 201
+    body = resp.json()
+    assert body["preprocess_status"] == "skipped"
+
+
+# ── validate_live_record unit tests (pure, no DB) ──────────────────────────────
+
+
+def test_validate_live_record_all_present_valid():
+    from estimation.ingestion.validator import validate_live_record, DEFAULT_CONFIG
+    raw = _make_raw(sm=50.0)
+    vr = validate_live_record(raw, DEFAULT_CONFIG)
+    assert vr.is_valid
+
+
+def test_validate_live_record_absent_ancillary_still_valid():
+    """Record with only soil_moisture should be valid under live rules."""
+    from datetime import datetime, timezone
+    from estimation.ingestion.validator import validate_live_record, DEFAULT_CONFIG
+    raw = RawRecord(
+        timestamp=datetime(2026, 4, 14, tzinfo=timezone.utc),
+        soil_moisture=45.0,
+        temperature=None,
+        humidity=None,
+        light=None,
+        drip=None,
+        mist=None,
+        fan=None,
+        row_index=0,
+    )
+    vr = validate_live_record(raw, DEFAULT_CONFIG)
+    assert vr.is_valid, vr.reason
+
+
+def test_validate_live_record_all_absent_is_valid():
+    """Even all-None record is valid under live rules — Kalman will just skip."""
+    from datetime import datetime, timezone
+    from estimation.ingestion.validator import validate_live_record, DEFAULT_CONFIG
+    raw = RawRecord(
+        timestamp=datetime(2026, 4, 14, tzinfo=timezone.utc),
+        soil_moisture=None,
+        temperature=None,
+        humidity=None,
+        light=None,
+        drip=None,
+        mist=None,
+        fan=None,
+        row_index=0,
+    )
+    vr = validate_live_record(raw, DEFAULT_CONFIG)
+    assert vr.is_valid
+
+
+def test_validate_live_record_out_of_range_field_is_invalid():
+    from estimation.ingestion.validator import validate_live_record, DEFAULT_CONFIG
+    raw = _make_raw(sm=9999.0)
+    vr = validate_live_record(raw, DEFAULT_CONFIG)
+    assert not vr.is_valid
+    assert vr.status == "out_of_range"
+
+
+def test_validate_live_record_absent_sm_with_present_oor_ancillary_invalid():
+    """Present but OOR ancillary must fail even when soil_moisture is absent."""
+    from datetime import datetime, timezone
+    from estimation.ingestion.validator import validate_live_record, DEFAULT_CONFIG
+    raw = RawRecord(
+        timestamp=datetime(2026, 4, 14, tzinfo=timezone.utc),
+        soil_moisture=None,
+        temperature=999.0,  # present and OOR
+        humidity=None,
+        light=None,
+        drip=None,
+        mist=None,
+        fan=None,
+        row_index=0,
+    )
+    vr = validate_live_record(raw, DEFAULT_CONFIG)
+    assert not vr.is_valid
