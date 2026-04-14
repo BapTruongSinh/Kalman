@@ -20,7 +20,14 @@ function num(v: number | null, decimals = 4): string {
   return v.toFixed(decimals)
 }
 
-function Gate({ pass }: { pass: boolean }) {
+function Gate({ pass }: { pass: boolean | null }) {
+  if (pass === null) {
+    return (
+      <span className="text-slate-500" aria-label="N/A">
+        N/A
+      </span>
+    )
+  }
   return (
     <span
       className={pass ? 'text-emerald-400' : 'text-red-400'}
@@ -56,11 +63,20 @@ function SliceTable({ s }: { s: SliceMetrics }) {
     },
     {
       label: 'Acceptance gate',
-      value: (
-        <span className={s.passes_acceptance_gate ? 'text-emerald-300 font-bold' : 'text-red-300 font-bold'}>
-          {s.passes_acceptance_gate ? '✓ PASS' : '✗ FAIL'}
-        </span>
-      ),
+      value:
+        s.passes_acceptance_gate === null ? (
+          <span className="text-slate-500 font-bold" aria-label="N/A">N/A</span>
+        ) : (
+          <span
+            className={
+              s.passes_acceptance_gate
+                ? 'text-emerald-300 font-bold'
+                : 'text-red-300 font-bold'
+            }
+          >
+            {s.passes_acceptance_gate ? '✓ PASS' : '✗ FAIL'}
+          </span>
+        ),
     },
   ]
 

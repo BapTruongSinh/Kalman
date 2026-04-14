@@ -195,6 +195,45 @@ class TestRunSeriesView:
         indices = [d["cycle_index"] for d in data]
         assert indices == sorted(indices)
 
+    # ---- Bad query-param validation (must return 400, not 500) -------------
+
+    def test_non_integer_limit_returns_400(self, client, run):
+        resp = client.get(f"/api/runs/{run.pk}/series/?limit=abc")
+        assert resp.status_code == 400
+        assert "limit" in resp.json().get("error", "")
+
+    def test_negative_limit_returns_400(self, client, run):
+        resp = client.get(f"/api/runs/{run.pk}/series/?limit=-1")
+        assert resp.status_code == 400
+
+    def test_zero_limit_returns_400(self, client, run):
+        resp = client.get(f"/api/runs/{run.pk}/series/?limit=0")
+        assert resp.status_code == 400
+
+    def test_non_integer_stride_returns_400(self, client, run):
+        resp = client.get(f"/api/runs/{run.pk}/series/?stride=abc")
+        assert resp.status_code == 400
+        assert "stride" in resp.json().get("error", "")
+
+    def test_negative_stride_returns_400(self, client, run):
+        resp = client.get(f"/api/runs/{run.pk}/series/?stride=-5")
+        assert resp.status_code == 400
+
+    def test_limit_clamped_to_max(self, client, run):
+        for i in range(5):
+            _cycle(run, i)
+        resp = client.get(f"/api/runs/{run.pk}/series/?limit=999999")
+        assert resp.status_code == 200
+        assert resp.json()["total_cycles"] == 5
+
+    def test_stride_bounds_id_scan(self, client, run):
+        """stride=large + limit=1 should return at most 1 cycle, not error."""
+        for i in range(20):
+            _cycle(run, i)
+        resp = client.get(f"/api/runs/{run.pk}/series/?stride=10&limit=1")
+        assert resp.status_code == 200
+        assert resp.json()["returned"] <= 1
+
 
 # ---------------------------------------------------------------------------
 # Metrics

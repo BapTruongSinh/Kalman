@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it, vi, afterEach } from 'vitest'
 import { fetchRuns, fetchSeries, fetchMetrics } from '../api/client'
 
 const RUNS = [{ id: 1, name: 'run-1', run_type: 'offline_replay', status: 'completed', created_at: '2024-01-01T00:00:00Z', dataset_source: null }]
@@ -19,7 +19,7 @@ const METRICS_RESP = {
 }
 
 function mockFetch(payload: unknown, ok = true) {
-  global.fetch = vi.fn().mockResolvedValue({
+  globalThis.fetch = vi.fn().mockResolvedValue({
     ok,
     json: () => Promise.resolve(payload),
     status: ok ? 200 : 500,
@@ -55,14 +55,14 @@ describe('API client', () => {
     it('appends slice param', async () => {
       mockFetch(SERIES_RESP)
       await fetchSeries(1, { slice: 'test' })
-      const url = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
       expect(url).toContain('slice=test')
     })
 
     it('appends limit and stride params', async () => {
       mockFetch(SERIES_RESP)
       await fetchSeries(1, { limit: 500, stride: 2 })
-      const url = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
+      const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
       expect(url).toContain('limit=500')
       expect(url).toContain('stride=2')
     })

@@ -47,12 +47,12 @@ export interface SliceMetrics {
   mae_arx: number | null
   mae_filtered: number | null
   variance_reduction: number | null
-  pass_variance_reduction: boolean
-  pass_rmse_guardrail: boolean
-  pass_mae_guardrail: boolean
+  pass_variance_reduction: boolean | null
+  pass_rmse_guardrail: boolean | null
+  pass_mae_guardrail: boolean | null
   cycle_success_rate: number | null
   sample_loss_rate: number | null
-  passes_acceptance_gate: boolean
+  passes_acceptance_gate: boolean | null
 }
 
 /** Envelope for GET /api/runs/:id/metrics/ */

@@ -15,12 +15,12 @@ function makeSlice(overrides: Partial<SliceMetrics> = {}): SliceMetrics {
     mae_arx: 0.35,
     mae_filtered: 0.30,
     variance_reduction: 0.25,
-    pass_variance_reduction: true,
-    pass_rmse_guardrail: true,
-    pass_mae_guardrail: true,
+    pass_variance_reduction: true as boolean | null,
+    pass_rmse_guardrail: true as boolean | null,
+    pass_mae_guardrail: true as boolean | null,
     cycle_success_rate: 0.95,
     sample_loss_rate: 0.05,
-    passes_acceptance_gate: true,
+    passes_acceptance_gate: true as boolean | null,
     ...overrides,
   }
 }
@@ -71,6 +71,22 @@ describe('MetricsPanel', () => {
   it('renders cycle success rate as percentage', () => {
     render(<MetricsPanel metrics={makeMetrics({ test: makeSlice({ cycle_success_rate: 0.95 }) })} />)
     expect(screen.getByText('95.0%')).toBeInTheDocument()
+  })
+
+  it('shows N/A for null gate flags instead of Fail', () => {
+    const s = makeSlice({
+      pass_variance_reduction: null,
+      pass_rmse_guardrail: null,
+      pass_mae_guardrail: null,
+      passes_acceptance_gate: null,
+    })
+    render(<MetricsPanel metrics={makeMetrics({ test: s })} />)
+    const nas = screen.getAllByText('N/A')
+    // At minimum the three individual gates + acceptance gate render as N/A
+    expect(nas.length).toBeGreaterThanOrEqual(4)
+    // Must NOT show ✗ Fail for null
+    expect(screen.queryByText(/✗ Fail/)).toBeNull()
+    expect(screen.queryByText(/✗ FAIL/)).toBeNull()
   })
 
   it('renders all three canonical slices in order (train → validation → test)', () => {
