@@ -317,7 +317,7 @@ def export_to_csv(run_pk: int, output_path: "Path | str") -> Path:
     Returns
     -------
     Path
-        Resolved path of the written file.
+        Path of the written file.
     """
     summaries = {s: evaluate_slice(run_pk, s) for s in _ALL_SLICES}
     output = Path(output_path)
