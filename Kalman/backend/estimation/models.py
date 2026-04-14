@@ -199,6 +199,11 @@ class PipelineCycle(models.Model):
         SKIPPED = "skipped", "Skipped"
         INVALID = "invalid", "Invalid"
 
+    class AdaptiveStatus(models.TextChoices):
+        R_UPDATED = "R_updated", "R Updated"
+        R_SKIPPED = "R_skipped", "R Skipped (no measurement)"
+        SKIPPED = "skipped", "Skipped (error path)"
+
     run = models.ForeignKey(
         ExperimentRun,
         on_delete=models.CASCADE,
@@ -245,6 +250,14 @@ class PipelineCycle(models.Model):
     kf_x_posterior = models.FloatField(null=True, blank=True, help_text="Filtered estimate x_k")
     kf_P_posterior = models.FloatField(null=True, blank=True, help_text="Updated covariance P_k")
 
+    # --- Adaptive estimator outcome ---
+    adaptive_status = models.CharField(
+        max_length=20,
+        choices=AdaptiveStatus.choices,
+        default=AdaptiveStatus.R_UPDATED,
+        help_text="Whether adaptive R was updated, skipped, or bypassed",
+    )
+
     # --- Cycle outcome ---
     cycle_status = models.CharField(
         max_length=30,
@@ -261,6 +274,32 @@ class PipelineCycle(models.Model):
             models.UniqueConstraint(
                 fields=["run", "cycle_index"],
                 name="uq_cycles_run_index",
+            ),
+            models.CheckConstraint(
+                check=models.Q(slice_type__in=["train", "validation", "test"]),
+                name="chk_cycles_slice_type",
+            ),
+            models.CheckConstraint(
+                check=models.Q(source_type__in=["csv_replay", "mysql_replay", "live"]),
+                name="chk_cycles_source_type",
+            ),
+            models.CheckConstraint(
+                check=models.Q(
+                    preprocess_status__in=["valid", "interpolated", "kept_last", "skipped", "invalid"]
+                ),
+                name="chk_cycles_preprocess_status",
+            ),
+            models.CheckConstraint(
+                check=models.Q(
+                    adaptive_status__in=["R_updated", "R_skipped", "skipped"]
+                ),
+                name="chk_cycles_adaptive_status",
+            ),
+            models.CheckConstraint(
+                check=models.Q(
+                    cycle_status__in=["ok", "skipped_no_measurement", "skipped_invalid", "error"]
+                ),
+                name="chk_cycles_cycle_status",
             ),
         ]
         indexes = [

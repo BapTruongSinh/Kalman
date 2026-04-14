@@ -4,13 +4,18 @@ Tests for ``estimation.pipeline.store`` (Task #007).
 Coverage targets
 ----------------
 * ``map_result_to_cycle`` — pure field-mapping correctness (kf_ prefix, all
-  columns, raw sensor passthrough from ProcessedRecord, None fallbacks).
+  columns, raw sensor passthrough from ProcessedRecord, None fallbacks,
+  adaptive_status mapping, enum validation).
 * ``bulk_save_cycles`` — DB round-trip, count return, empty-sequence guard,
   uniqueness constraint enforcement.
 * ``begin_run`` / ``end_run`` — status transitions, timestamp population,
   local object refresh, invalid-precondition errors.
 * Traceability — persisted rows are queryable and carry the full FK chain
   (cycle → run → config); error/skipped rows store explicit status.
+* Adaptive status — all three values (R_updated, R_skipped, skipped) persist
+  and are readable back from the database.
+* Enum validation — mapper raises ValueError for any unrecognised enum value
+  before any DB write occurs.
 """
 
 from __future__ import annotations
@@ -176,6 +181,23 @@ class TestMapResultToCycle:
         result = _make_result(P_posterior=0.512)
         cycle = map_result_to_cycle(result, pending_run, slice_type="train")
         assert cycle.kf_P_posterior == pytest.approx(0.512)
+
+    # ── adaptive_status mapping ───────────────────────────────────────────────
+
+    def test_adaptive_status_r_updated(self, pending_run: ExperimentRun) -> None:
+        result = _make_result(adaptive_status="R_updated")
+        cycle = map_result_to_cycle(result, pending_run, slice_type="train")
+        assert cycle.adaptive_status == "R_updated"
+
+    def test_adaptive_status_r_skipped(self, pending_run: ExperimentRun) -> None:
+        result = _make_result(adaptive_status="R_skipped", cycle_status="skipped_no_measurement")
+        cycle = map_result_to_cycle(result, pending_run, slice_type="train")
+        assert cycle.adaptive_status == "R_skipped"
+
+    def test_adaptive_status_skipped(self, pending_run: ExperimentRun) -> None:
+        result = _make_result(adaptive_status="skipped", cycle_status="error", innovation=None, K=None)
+        cycle = map_result_to_cycle(result, pending_run, slice_type="train")
+        assert cycle.adaptive_status == "skipped"
 
     # ── Scalar result fields ─────────────────────────────────────────────────
 
@@ -486,6 +508,7 @@ class TestTraceability:
         assert saved.kf_K == pytest.approx(0.469)
         assert saved.kf_x_posterior == pytest.approx(58.0)
         assert saved.kf_P_posterior == pytest.approx(0.506)
+        assert saved.adaptive_status == "R_updated"
         assert saved.cycle_status == "ok"
         assert saved.error_message is None
 
@@ -522,3 +545,119 @@ class TestTraceability:
             .values_list("cycle_status", flat=True)
         )
         assert statuses == ["ok", "skipped_no_measurement", "error"]
+
+
+# ── TestAdaptiveStatusRoundTrip ───────────────────────────────────────────────
+
+
+@pytest.mark.django_db()
+class TestAdaptiveStatusRoundTrip:
+    """Verify adaptive_status persists correctly for all three valid values."""
+
+    def _save_with_adaptive(
+        self, run: ExperimentRun, adaptive_status: str, cycle_status: str = "ok"
+    ) -> PipelineCycle:
+        result = _make_result(
+            adaptive_status=adaptive_status,
+            cycle_status=cycle_status,
+            innovation=None if cycle_status != "ok" else 0.5,
+            K=None if cycle_status != "ok" else 0.488,
+        )
+        cycle = map_result_to_cycle(result, run, slice_type="test")
+        bulk_save_cycles([cycle])
+        return PipelineCycle.objects.get(run=run, cycle_index=0)
+
+    def test_r_updated_persists(self, pending_run: ExperimentRun) -> None:
+        saved = self._save_with_adaptive(pending_run, "R_updated", "ok")
+        assert saved.adaptive_status == "R_updated"
+
+    def test_r_skipped_persists(self, pending_run: ExperimentRun) -> None:
+        saved = self._save_with_adaptive(pending_run, "R_skipped", "skipped_no_measurement")
+        assert saved.adaptive_status == "R_skipped"
+
+    def test_skipped_persists(self, pending_run: ExperimentRun) -> None:
+        saved = self._save_with_adaptive(pending_run, "skipped", "error")
+        assert saved.adaptive_status == "skipped"
+
+    def test_adaptive_status_in_mixed_batch(self, pending_run: ExperimentRun) -> None:
+        """All three adaptive_status values survive a mixed batch write."""
+        rows = [
+            map_result_to_cycle(
+                _make_result(cycle_index=0, adaptive_status="R_updated", cycle_status="ok"),
+                pending_run, slice_type="test",
+            ),
+            map_result_to_cycle(
+                _make_result(
+                    cycle_index=1, adaptive_status="R_skipped",
+                    cycle_status="skipped_no_measurement", innovation=None, K=None,
+                ),
+                pending_run, slice_type="test",
+            ),
+            map_result_to_cycle(
+                _make_result(
+                    cycle_index=2, adaptive_status="skipped",
+                    cycle_status="error", innovation=None, K=None,
+                ),
+                pending_run, slice_type="test",
+            ),
+        ]
+        bulk_save_cycles(rows)
+        adaptive_statuses = list(
+            PipelineCycle.objects.filter(run=pending_run)
+            .order_by("cycle_index")
+            .values_list("adaptive_status", flat=True)
+        )
+        assert adaptive_statuses == ["R_updated", "R_skipped", "skipped"]
+
+
+# ── TestEnumValidation ────────────────────────────────────────────────────────
+
+
+class TestEnumValidation:
+    """map_result_to_cycle must reject invalid enum values with ValueError.
+
+    These are pure-function tests — no database writes.
+    """
+
+    def test_invalid_slice_type_raises(self, pending_run: ExperimentRun) -> None:
+        with pytest.raises(ValueError, match="slice_type"):
+            map_result_to_cycle(_make_result(), pending_run, slice_type="bogus_slice")
+
+    def test_invalid_source_type_raises(self, pending_run: ExperimentRun) -> None:
+        with pytest.raises(ValueError, match="source_type"):
+            map_result_to_cycle(
+                _make_result(), pending_run,
+                slice_type="test", source_type="bogus_source",
+            )
+
+    def test_invalid_preprocess_status_raises(self, pending_run: ExperimentRun) -> None:
+        result = _make_result(preprocess_status="bogus_pre")
+        with pytest.raises(ValueError, match="preprocess_status"):
+            map_result_to_cycle(result, pending_run, slice_type="test")
+
+    def test_invalid_adaptive_status_raises(self, pending_run: ExperimentRun) -> None:
+        result = _make_result(adaptive_status="bogus_adaptive")
+        with pytest.raises(ValueError, match="adaptive_status"):
+            map_result_to_cycle(result, pending_run, slice_type="test")
+
+    def test_invalid_cycle_status_raises(self, pending_run: ExperimentRun) -> None:
+        result = _make_result(cycle_status="bogus_status")
+        with pytest.raises(ValueError, match="cycle_status"):
+            map_result_to_cycle(result, pending_run, slice_type="test")
+
+    def test_valid_values_do_not_raise(self, pending_run: ExperimentRun) -> None:
+        """Sanity check: all valid combinations pass without error."""
+        result = _make_result(
+            preprocess_status="kept_last",
+            adaptive_status="R_skipped",
+            cycle_status="skipped_no_measurement",
+            innovation=None,
+            K=None,
+        )
+        cycle = map_result_to_cycle(
+            result, pending_run,
+            slice_type="validation",
+            source_type="mysql_replay",
+        )
+        assert cycle.slice_type == "validation"
+        assert cycle.adaptive_status == "R_skipped"

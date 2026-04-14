@@ -409,7 +409,7 @@ estimation/pipeline/
 | `timestamp` | `sample_ts` | Source timestamp |
 | `cycle_index` | `cycle_index` | 0-based index within run |
 | `raw_soil_moisture` | `raw_soil_moisture` | From `CycleResult` (not `ProcessedRecord`) |
-| `preprocess_status` | `preprocess_status` | `"valid"` / `"kept_last"` / `"interpolated"` / `"skipped"` |
+| `preprocess_status` | `preprocess_status` | `"valid"` / `"kept_last"` / `"interpolated"` / `"skipped"` / `"invalid"` |
 | `arx_predicted` | `arx_predicted` | NULL when prediction unavailable |
 | `x_prior` | `kf_x_prior` | Prior estimate `x̂⁻ₖ` |
 | `P_prior` | `kf_P_prior` | Prior covariance `P̂⁻ₖ` |
@@ -418,7 +418,8 @@ estimation/pipeline/
 | `K` | `kf_K` | Kalman gain `Kₖ`; NULL on skipped steps |
 | `x_posterior` | `kf_x_posterior` | Filtered estimate `x̂ₖ` |
 | `P_posterior` | `kf_P_posterior` | Updated covariance `Pₖ` |
-| `cycle_status` | `cycle_status` | `"ok"` / `"skipped_no_measurement"` / `"error"` |
+| `adaptive_status` | `adaptive_status` | `"R_updated"` / `"R_skipped"` / `"skipped"` |
+| `cycle_status` | `cycle_status` | `"ok"` / `"skipped_no_measurement"` / `"skipped_invalid"` / `"error"` |
 | `error_message` | `error_message` | Non-NULL only on `"error"` cycles |
 
 Run-level metadata (`run`, `slice_type`, `source_type`) is supplied by the caller

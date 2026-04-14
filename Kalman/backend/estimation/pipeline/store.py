@@ -34,6 +34,25 @@ from ..models import ExperimentRun, PipelineCycle
 logger = logging.getLogger(__name__)
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+
+def _require_choice(value: str, choices: type, field: str) -> str:
+    """Validate *value* against a TextChoices class; raise ``ValueError`` if invalid.
+
+    This provides a storage-boundary guard so that callers cannot silently
+    write enum garbage into the traceability table.  The corresponding
+    ``CheckConstraint``s on the model back-stop this at the DB level.
+    """
+    valid = {v for v, _ in choices.choices}
+    if value not in valid:
+        raise ValueError(
+            f"Invalid {field} value {value!r}. "
+            f"Expected one of {sorted(valid)}."
+        )
+    return value
+
+
 # ── Exception ─────────────────────────────────────────────────────────────────
 
 
@@ -83,11 +102,17 @@ def map_result_to_cycle(
     K                        → kf_K
     x_posterior              → kf_x_posterior
     P_posterior              → kf_P_posterior
+    adaptive_status          → adaptive_status
     cycle_status             → cycle_status
     error_message            → error_message
 
     Run-level metadata is supplied by the caller:
     run, slice_type, source_type → PipelineCycle columns of the same name.
+
+    All enum fields (``slice_type``, ``source_type``, ``preprocess_status``,
+    ``adaptive_status``, ``cycle_status``) are validated against their
+    ``TextChoices`` before the instance is constructed.  Unrecognised values
+    raise ``ValueError`` immediately — before any DB write.
 
     Parameters
     ----------
@@ -105,6 +130,13 @@ def map_result_to_cycle(
         the raw sensor readings (temperature, humidity, light, drip, mist, fan)
         are copied to the corresponding ``raw_*`` columns for full traceability.
     """
+    # ── Enum validation (storage-boundary guard) ──────────────────────────────
+    _require_choice(slice_type, PipelineCycle.SliceType, "slice_type")
+    _require_choice(source_type, PipelineCycle.SourceType, "source_type")
+    _require_choice(result.preprocess_status, PipelineCycle.PreprocessStatus, "preprocess_status")
+    _require_choice(result.adaptive_status, PipelineCycle.AdaptiveStatus, "adaptive_status")
+    _require_choice(result.cycle_status, PipelineCycle.CycleStatus, "cycle_status")
+
     raw = record.raw if record is not None else None
 
     return PipelineCycle(
@@ -133,6 +165,8 @@ def map_result_to_cycle(
         kf_K=result.K,
         kf_x_posterior=result.x_posterior,
         kf_P_posterior=result.P_posterior,
+        # ── Adaptive estimator outcome ────────────────────────────────────────
+        adaptive_status=result.adaptive_status,
         # ── Cycle outcome ─────────────────────────────────────────────────────
         cycle_status=result.cycle_status,
         error_message=result.error_message,
