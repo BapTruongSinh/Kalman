@@ -117,6 +117,11 @@ class RunConfig:
     # ── Validation ────────────────────────────────────────────────────────────
 
     def __post_init__(self) -> None:
+        # Coerce arx_input_cols to an immutable tuple regardless of what the caller
+        # passed (list, generator, etc.).  Must be done via object.__setattr__
+        # because the dataclass is frozen — direct assignment raises FrozenInstanceError.
+        object.__setattr__(self, "arx_input_cols", tuple(self.arx_input_cols))
+
         # Delegate Kalman validation — reuses KalmanConfig's battle-tested checks.
         KalmanConfig(
             x0=self.x0,

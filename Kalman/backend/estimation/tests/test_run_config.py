@@ -4,17 +4,21 @@ Tests for ``estimation.run_config``.
 Coverage areas
 --------------
 * RunConfig validation — good values, every possible bad value, NaN/Inf.
+* arx_input_cols coercion — list/other sequence normalised to immutable tuple.
 * JSON round-trip — to_json() / from_json() with full defaults and custom values.
 * Sub-config extraction — to_kalman_config(), to_arx_train_config().
 * ORM round-trip — from_experiment_config() via a stub object.
 * Service layer (DB) — create_run, load_config, update_config, ConfigFrozenError.
 * Acceptance criterion — replay reproducibility: same config → same KalmanConfig/ARXTrainConfig.
+* Import isolation — ``from estimation.run_config import RunConfig`` must not require Django.
 """
 
 from __future__ import annotations
 
 import math
 import json
+import subprocess
+import sys
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -537,3 +541,129 @@ class TestRunConfigImmutability:
         cfg = RunConfig()
         with pytest.raises((TypeError, AttributeError)):
             cfg.x0 = 99.0  # type: ignore[misc]
+
+
+# ── TestArxInputColsCoercion ──────────────────────────────────────────────────
+
+class TestArxInputColsCoercion:
+    """arx_input_cols is always stored as an immutable tuple.
+
+    Regression guard for: passing a list allowed in-place mutation even though
+    the dataclass is frozen, because frozen only prevents field *rebinding*,
+    not mutation of the referenced mutable object.
+    """
+
+    def test_list_input_stored_as_tuple(self):
+        cfg = RunConfig(arx_input_cols=["Temperature", "Humidity"])
+        assert isinstance(cfg.arx_input_cols, tuple)
+        assert cfg.arx_input_cols == ("Temperature", "Humidity")
+
+    def test_list_cannot_be_mutated_after_construction(self):
+        original = ["Temperature", "Humidity"]
+        cfg = RunConfig(arx_input_cols=original)
+        # Mutate the original list — stored value must be unaffected.
+        original.append("Light")
+        assert cfg.arx_input_cols == ("Temperature", "Humidity")
+        assert len(cfg.arx_input_cols) == 2
+
+    def test_stored_tuple_has_no_append(self):
+        cfg = RunConfig(arx_input_cols=["Temperature"])
+        assert not hasattr(cfg.arx_input_cols, "append")
+
+    def test_probe_list_append_does_not_mutate_config(self):
+        """Exact probe from the finding report."""
+        cfg = RunConfig(arx_input_cols=["Temperature"])
+        with pytest.raises(AttributeError):
+            cfg.arx_input_cols.append("Humidity")  # type: ignore[attr-defined]
+
+    def test_tuple_input_stays_tuple(self):
+        cols = ("Temperature", "Humidity", "Light")
+        cfg = RunConfig(arx_input_cols=cols)
+        assert isinstance(cfg.arx_input_cols, tuple)
+        assert cfg.arx_input_cols == cols
+
+    def test_json_round_trip_preserves_tuple_type(self):
+        cfg = RunConfig(arx_input_cols=["Temperature", "Humidity"])
+        cfg2 = RunConfig.from_json(cfg.to_json())
+        assert isinstance(cfg2.arx_input_cols, tuple)
+
+    def test_from_experiment_config_stub_returns_tuple(self):
+        """from_experiment_config always yields a tuple, not a list."""
+        stub = MagicMock()
+        stub.run.name = "t"
+        stub.run.dataset_source = ""
+        stub.x0 = 0.0; stub.P0 = 1.0; stub.Q = 0.05
+        stub.R0 = 1.0; stub.R_min = 0.05; stub.R_max = 25.0; stub.alpha = 0.95
+        stub.train_ratio = 0.6; stub.val_ratio = 0.2; stub.test_ratio = 0.2
+        stub.arx_na = 2; stub.arx_nb = 2; stub.arx_nk = 1
+        stub.preprocessing_policy = "keep_last"
+        # JSON contains a list (as produced by json.dumps on a list)
+        stub.raw_config_json = '{"arx_input_cols": ["Temperature", "Humidity"]}'
+        cfg = RunConfig.from_experiment_config(stub)
+        assert isinstance(cfg.arx_input_cols, tuple)
+
+
+# ── TestImportIsolation ───────────────────────────────────────────────────────
+
+class TestImportIsolation:
+    """``from estimation.run_config import RunConfig`` must not require Django.
+
+    This is verified by running a fresh Python subprocess with no
+    DJANGO_SETTINGS_MODULE set.  The import should succeed and print 'ok'.
+    """
+
+    _BACKEND_DIR = str(
+        __import__("pathlib").Path(__file__).resolve().parents[2]
+    )  # …/Kalman/backend
+
+    def _run_isolated(self, code: str) -> subprocess.CompletedProcess:
+        """Run *code* in a clean subprocess without Django settings."""
+        env = {
+            k: v
+            for k, v in __import__("os").environ.items()
+            if k != "DJANGO_SETTINGS_MODULE"
+        }
+        return subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            cwd=self._BACKEND_DIR,
+            env=env,
+        )
+
+    def test_run_config_importable_without_django(self):
+        """Pure RunConfig import must succeed with no DJANGO_SETTINGS_MODULE."""
+        result = self._run_isolated(
+            "from estimation.run_config import RunConfig, ConfigFrozenError; print('ok')"
+        )
+        assert result.returncode == 0, (
+            f"Import failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "ok" in result.stdout
+
+    def test_run_config_construction_without_django(self):
+        """RunConfig() construction must work outside Django context."""
+        result = self._run_isolated(
+            "from estimation.run_config import RunConfig\n"
+            "cfg = RunConfig(name='t', Q=0.1)\n"
+            "assert cfg.Q == 0.1\n"
+            "print('ok')"
+        )
+        assert result.returncode == 0, (
+            f"Construction failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "ok" in result.stdout
+
+    def test_service_functions_not_imported_eagerly(self):
+        """Service names must NOT appear in the module dict before first access."""
+        result = self._run_isolated(
+            "import sys\n"
+            "from estimation.run_config import RunConfig\n"
+            "import estimation.run_config as m\n"
+            "assert 'create_run' not in m.__dict__, "
+            "    'create_run imported eagerly — Django coupling not fixed'\n"
+            "print('ok')"
+        )
+        assert result.returncode == 0, (
+            f"Eager import check failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
