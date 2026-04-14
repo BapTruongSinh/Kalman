@@ -15,7 +15,7 @@ For design tokens, component specs, and UX flows see DESIGN_SYSTEM.md.
 
 ## Overview
 
-The v1 system is a greenhouse state-estimation pipeline oriented toward Adaptive Kalman plus AMPC. It accepts either offline records from `../ARX/greenhouse_data.csv` or later live sensor records, validates and preprocesses those records, asks a prediction adapter for a next-step prediction, uses the estimator module for an Adaptive Kalman-ready update with the real measurement, then stores and visualizes raw, predicted, and filtered values.
+The v1 system is a greenhouse state-estimation pipeline oriented toward Adaptive Kalman plus AMPC. It accepts either offline records from `../ARX/greenhouse_data.csv` or later live sensor records, validates and preprocesses those records, optionally retrains the ARX baseline offline for the selected run, asks a prediction adapter for a next-step prediction, uses the estimator module for an Adaptive Kalman-ready update with the real measurement, then stores and visualizes raw, predicted, and filtered values.
 
 The core architectural decision is to keep v1 staged while preventing a wrong baseline-only design. Full closed-loop AMPC actuation and cloud-scale operations are postponed until the prediction plus Adaptive Kalman foundation is validated, but AMPC state/control/disturbance/cost/safety contracts must remain explicit.
 
@@ -114,8 +114,8 @@ This section remains a template until the Django/backend implementation begins.
 1. Load a row from ../ARX/greenhouse_data.csv or receive a sensor sample.
 2. Validate timestamp and variable fields.
 3. Apply preprocessing policy for missing, malformed, repeated, or out-of-range values.
-4. Send the validated state/history to the prediction adapter. ARX is the first baseline adapter.
-5. Use prediction output as the estimator prediction input.
+4. Send the validated state/history to the prediction adapter. ARX is the first retrainable offline baseline adapter.
+5. Use the ARX artifact for the current run to generate prediction output as the estimator prediction input.
 6. Run Adaptive Kalman-ready uncertainty propagation and measurement update.
 7. Store raw measurement, prediction output, filtered estimate, residual/innovation, covariance or adaptive status, timestamp, config, and status.
 8. Visualize raw, predicted, and filtered series.
@@ -163,7 +163,7 @@ The canonical design system and UX flow summaries live in [`DESIGN_SYSTEM.md`](.
 
 ## Performance Considerations
 
-- Prediction plus Adaptive Kalman-ready update target: <= 500 ms per cycle.
+- Prediction plus Adaptive Kalman-ready update target: <= 500 ms per cycle, excluding explicit offline ARX retraining.
 - Dashboard/output update target: <= 5 seconds.
 - The pipeline should continue operating through short missing/noisy data windows.
 

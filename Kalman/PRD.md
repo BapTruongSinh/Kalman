@@ -95,7 +95,8 @@ The repository already includes ARX work, a greenhouse dataset, and additional r
 
 ### 5.3 Prediction Model Boundary
 
-- **FR-007**: The system must reuse the existing ARX work in `../ARX/` as the initial prediction baseline where practical.
+- **FR-007**: The system must reuse the existing ARX work in `../ARX/` as the initial retrainable offline prediction baseline where practical.
+- **FR-007a**: v1 should support explicit offline ARX retraining from `../ARX/greenhouse_data.csv` or a selected compatible CSV, then persist the trained coefficients/artifact used by the Kalman run.
 - **FR-008**: The prediction block must output the predicted next-step state or output needed by the estimator update step.
 - **FR-009**: The integration must keep prediction and estimation modules loosely coupled so ARX can be replaced or compared later with alternatives such as LightGBM or XGBoost.
 
@@ -189,7 +190,7 @@ The repository already includes ARX work, a greenhouse dataset, and additional r
 - Cloud-scale deployment, high-availability clusters, advanced CI/CD, or enterprise production hardening.
 - Native Android or iOS apps.
 - External weather API, full ET0-based live scheduling, radiation models, or larger physical greenhouse models. FAO-56/ET0 formulas may still be documented for AMPC readiness and offline experiments.
-- Automatic ARX retraining, model registry, or online learning infrastructure.
+- Automatic online ARX retraining, model registry, or online learning infrastructure. Explicit offline retraining for a selected run is allowed in v1.
 - Public-facing marketing website implementation in v1.
 
 ---
@@ -199,8 +200,8 @@ The repository already includes ARX work, a greenhouse dataset, and additional r
 | # | Question | Owner | Status |
 |---|----------|-------|--------|
 | 1 | Which variables are included in Adaptive Kalman estimation first: soil moisture `theta`, root-zone depletion `Dr`, or soil moisture plus temperature and humidity? | Project owner | Open |
-| 2 | Is ARX used as a fixed prediction model, a retrained model, an offline-only reference model, or a baseline to compare against LightGBM/XGBoost? | Project owner | Open |
-| 3 | Is `../ARX/greenhouse_data.csv` used for training, tuning, evaluation, or all three? | Project owner | Open |
+| 2 | Is ARX used as a fixed prediction model, a retrained model, an offline-only reference model, or a baseline to compare against LightGBM/XGBoost? | Project owner | Answered: use ARX as an explicit offline retrainable baseline in v1; keep model adapter replaceable; leave LightGBM/XGBoost comparison for later unless explicitly added. |
+| 3 | Is `../ARX/greenhouse_data.csv` used for training, tuning, evaluation, or all three? | Project owner | Answered: use it for all three with chronological split; train ARX on train slice, tune/check on validation slice, and reserve test slice for final reported Kalman/ARX evaluation. |
 | 4 | Which minimal Adaptive Kalman mechanism is used in v1: bounded innovation-driven `Q`/`R` tuning, another adaptive rule, or an explicitly documented fallback? | Project owner | Open |
 | 5 | What initial state, initial covariance, process noise, and measurement noise should be used? | Project owner | Open |
 | 6 | Is v1 offline-first, real-time-first, or both from the start? | Project owner | Open |
