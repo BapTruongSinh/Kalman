@@ -74,9 +74,9 @@ def evaluate_slice(run_pk: int, slice_type: str) -> EvaluationSummary:
 
     run = ExperimentRun.objects.get(pk=run_pk)
     rows = list(
-        PipelineCycle.objects.filter(run=run, slice_type=slice_type).values(
-            *_CYCLE_VALUE_FIELDS
-        )
+        PipelineCycle.objects.filter(run=run, slice_type=slice_type)
+        .order_by("cycle_index")
+        .values(*_CYCLE_VALUE_FIELDS)
     )
     m = compute_metrics(rows)
 
@@ -412,11 +412,12 @@ def export_to_csv(run_pk: int, output_path: "Path | str") -> Path:
 def export_plots(run_pk: int, output_dir: "Path | str") -> list[Path]:
     """Generate diagnostic plots for all slices of *run_pk*.
 
-    Produces four plots per slice:
+    Produces up to four plots per slice:
     1. ``time_series_{slice}.png``  — raw / ARX predicted / Kalman filtered
     2. ``innovation_{slice}.png``   — innovation sequence
     3. ``adaptive_R_{slice}.png``   — adaptive measurement noise R
     4. ``residuals_{slice}.png``    — histogram of (raw − filtered) residuals
+       (only written when at least one paired raw/filtered value is present)
 
     Requires ``matplotlib`` to be importable with the current numpy ABI.
     Returns an empty list (with a warning) if matplotlib is unavailable.

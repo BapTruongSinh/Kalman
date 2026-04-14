@@ -741,6 +741,87 @@ class TestEvaluateSlice:
 
 
 @pytest.mark.django_db
+class TestEvaluateSliceOrderStability:
+    """evaluate_slice() must sort by cycle_index so np.diff-based metrics
+    (variance reduction, ADR-003 gate) are deterministic regardless of DB
+    insertion order."""
+
+    def test_out_of_order_insert_gives_same_result_as_sorted(
+        self, run, cycle_factory
+    ):
+        from estimation.evaluation.metrics import compute_metrics
+        from estimation.evaluation.reporter import evaluate_slice
+
+        # Monotonically increasing soil-moisture values; order matters for diff
+        sm_values = [50.0, 51.0, 52.0, 53.0, 54.0, 55.0]
+
+        # Insert in reverse cycle_index order to defeat any implicit DB ordering
+        for i, sm in reversed(list(enumerate(sm_values))):
+            cycle_factory(slice_type="train", index=i, raw_sm=sm, kf_post=sm - 0.1)
+
+        # compute_metrics on rows sorted by cycle_index (ground truth)
+        from estimation.models import PipelineCycle
+
+        sorted_rows = list(
+            PipelineCycle.objects.filter(run=run, slice_type="train")
+            .order_by("cycle_index")
+            .values(
+                "raw_soil_moisture",
+                "arx_predicted",
+                "kf_x_prior",
+                "kf_P_prior",
+                "kf_innovation",
+                "kf_R",
+                "kf_K",
+                "kf_x_posterior",
+                "kf_P_posterior",
+                "cycle_status",
+                "adaptive_status",
+                "latency_ms",
+            )
+        )
+        expected = compute_metrics(sorted_rows)
+
+        # evaluate_slice must produce the same variance_reduction
+        summary = evaluate_slice(run.pk, "train")
+        assert summary.variance_reduction == expected.variance_reduction
+        assert summary.var_diff_raw == expected.var_diff_raw
+        assert summary.var_diff_filtered == expected.var_diff_filtered
+
+    def test_different_insert_orders_yield_identical_summary(
+        self, run, cycle_factory
+    ):
+        """Two runs with the same data but different insert orders must agree."""
+        from estimation.evaluation.reporter import evaluate_slice
+
+        sm_values = [50.0, 52.0, 51.0, 53.0, 55.0, 54.0]
+
+        # Insert in the given (non-monotonic) order
+        for i, sm in enumerate(sm_values):
+            cycle_factory(slice_type="validation", index=i, raw_sm=sm, kf_post=sm - 0.2)
+
+        summary = evaluate_slice(run.pk, "validation")
+
+        # The DB-ordered result must match manually sorted computation
+        from estimation.evaluation.metrics import compute_metrics
+        from estimation.models import PipelineCycle
+
+        sorted_rows = list(
+            PipelineCycle.objects.filter(run=run, slice_type="validation")
+            .order_by("cycle_index")
+            .values(
+                "raw_soil_moisture", "arx_predicted", "kf_x_prior", "kf_P_prior",
+                "kf_innovation", "kf_R", "kf_K", "kf_x_posterior", "kf_P_posterior",
+                "cycle_status", "adaptive_status", "latency_ms",
+            )
+        )
+        expected = compute_metrics(sorted_rows)
+        assert summary.variance_reduction == expected.variance_reduction
+
+
+# ── TestEvaluateSliceIdempotent ────────────────────────────────────────────────
+
+
 class TestEvaluateSliceIdempotent:
     def test_second_call_updates_not_duplicates(self, run, cycle_factory):
         from estimation.evaluation.reporter import evaluate_slice
