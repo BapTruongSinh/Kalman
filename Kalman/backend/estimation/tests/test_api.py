@@ -277,6 +277,44 @@ class TestRunMetricsView:
         s = client.get(f"/api/runs/{run.pk}/metrics/").json()["slices"]["test"]
         assert s["passes_acceptance_gate"] is True
 
+    def test_passes_acceptance_gate_null_when_any_flag_is_null(self, client, run):
+        """API must return null (not false) when gate flags are not yet evaluated."""
+        from estimation.models import EvaluationSummary
+
+        EvaluationSummary.objects.create(
+            run=run,
+            slice_type="validation",
+            n_samples=50,
+            n_valid=48,
+            n_skipped=1,
+            n_error=1,
+            # pass_variance_reduction intentionally omitted (NULL in DB)
+            pass_rmse_guardrail=True,
+            pass_mae_guardrail=True,
+        )
+        s = client.get(f"/api/runs/{run.pk}/metrics/").json()["slices"]["validation"]
+        assert s["passes_acceptance_gate"] is None, (
+            f"Expected null but got {s['passes_acceptance_gate']!r}; "
+            "backend should propagate unknown gate state instead of coercing to False"
+        )
+
+    def test_passes_acceptance_gate_false_when_one_flag_fails(self, client, run):
+        from estimation.models import EvaluationSummary
+
+        EvaluationSummary.objects.create(
+            run=run,
+            slice_type="train",
+            n_samples=100,
+            n_valid=90,
+            n_skipped=5,
+            n_error=5,
+            pass_variance_reduction=False,
+            pass_rmse_guardrail=True,
+            pass_mae_guardrail=True,
+        )
+        s = client.get(f"/api/runs/{run.pk}/metrics/").json()["slices"]["train"]
+        assert s["passes_acceptance_gate"] is False
+
     def test_computed_cycle_success_rate(self, client, run):
         _summary(run, "test")
         s = client.get(f"/api/runs/{run.pk}/metrics/").json()["slices"]["test"]

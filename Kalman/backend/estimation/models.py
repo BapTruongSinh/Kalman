@@ -448,10 +448,13 @@ class EvaluationSummary(models.Model):
         return (self.n_skipped + self.n_error) / self.n_samples
 
     @property
-    def passes_acceptance_gate(self) -> bool:
-        """True if all three ADR-003 acceptance criteria pass."""
-        return bool(
-            self.pass_variance_reduction
-            and self.pass_rmse_guardrail
-            and self.pass_mae_guardrail
+    def passes_acceptance_gate(self) -> bool | None:
+        """True if all three ADR-003 criteria pass, None if any flag is unknown."""
+        flags = (
+            self.pass_variance_reduction,
+            self.pass_rmse_guardrail,
+            self.pass_mae_guardrail,
         )
+        if any(flag is None for flag in flags):
+            return None
+        return all(flags)
