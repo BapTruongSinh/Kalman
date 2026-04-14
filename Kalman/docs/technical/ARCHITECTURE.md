@@ -221,6 +221,96 @@ from estimation.prediction import (
 
 ---
 
+## Adaptive Kalman Cycle (`estimation.kalman`)
+
+The `estimation.kalman` package provides the v1 scalar state-estimator for
+`Soil_Moisture`.  It consumes the output of the prediction adapter and a raw
+preprocessed measurement to produce a filtered estimate each cycle.
+
+### Module public API
+
+```python
+from estimation.kalman import (
+    KalmanConfig,   # frozen hyperparameter dataclass
+    KalmanState,    # mutable runtime state
+    CycleResult,    # frozen per-cycle output record
+    AdaptiveKalmanCycle,  # orchestrates prediction + update
+)
+```
+
+### Data contracts
+
+**`KalmanConfig`** — frozen dataclass (hyperparameters, validated in `__post_init__`):
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `x0` | 0.0 | Initial state estimate |
+| `P0` | 1.0 | Initial error covariance |
+| `Q` | 0.05 | Process noise (fixed per run) |
+| `R0` | 1.0 | Initial measurement noise |
+| `R_min` | 0.05 | Lower bound for adaptive R |
+| `R_max` | 25.0 | Upper bound for adaptive R |
+| `alpha` | 0.95 | EMA decay for adaptive R |
+
+**`KalmanState`** — mutable dataclass updated in-place each cycle:
+`x_post`, `P_post`, `R`, `step`.
+
+**`CycleResult`** — frozen per-cycle output, mirrors `PipelineCycle` Django model:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| `timestamp` | `datetime` | Record timestamp |
+| `cycle_index` | `int` | Sequential cycle counter |
+| `raw_soil_moisture` | `float \| None` | Raw measurement |
+| `preprocess_status` | `str` | From `ProcessedRecord` |
+| `arx_predicted` | `float \| None` | ARX prior (`None` if unavailable) |
+| `x_prior` | `float` | Time-update prediction (ARX or propagated) |
+| `P_prior` | `float` | Prior error covariance |
+| `innovation` | `float \| None` | `z_k - x_prior`; `None` if skipped |
+| `R` | `float` | Current adaptive measurement noise |
+| `K` | `float \| None` | Kalman gain; `None` if skipped |
+| `x_posterior` | `float` | Filtered state estimate |
+| `P_posterior` | `float` | Posterior error covariance |
+| `cycle_status` | `str` | `"ok"` / `"skipped_no_measurement"` / `"error"` |
+| `adaptive_status` | `str` | `"updated"` / `"unchanged"` / `"clamped"` |
+| `latency_ms` | `float \| None` | Wall-clock time for this cycle |
+| `error_message` | `str \| None` | Populated on `"error"` status only |
+
+### Estimation cycle (one step)
+
+```text
+1. Obtain ARX prior via PredictionAdapter (if trained and history sufficient)
+   — falls back to last posterior if adapter unavailable / prediction fails
+2. Time update:  x_prior = arx_predicted OR x_post_prev
+                 P_prior = P_post_prev + Q
+3. Measurement check:
+   — if measurement absent or status == "skipped":
+       x_post = x_prior, P_post = P_prior, R unchanged → status "skipped_no_measurement"
+   — else (measurement z available):
+4. Innovation:  e = z - x_prior
+5. Adaptive R:  R_new = alpha * R + (1 - alpha) * e²   → clip to [R_min, R_max]
+6. Kalman gain: K = P_prior / (P_prior + R_new)
+7. Update:      x_post = x_prior + K * e
+                P_post = (1 - K) * P_prior              (guarantees P_post < P_prior)
+8. Emit CycleResult with all internals logged
+```
+
+### "Never raises" contract
+
+`AdaptiveKalmanCycle.step()` catches all exceptions internally.  On failure it
+returns a `CycleResult` with `cycle_status="error"` and an `error_message`, and
+**preserves the last known good state**.  The pipeline is never interrupted by a
+single bad record.
+
+### Adapter integration
+
+`AdaptiveKalmanCycle.__init__` accepts an optional `adapter: PredictionAdapter`.
+History of preprocessed records is maintained internally and fed to the adapter
+for causal predictions.  Before `min_history_len` records have accumulated, the
+prior falls back to the last posterior (`x_post`).
+
+---
+
 ## AMPC-Ready Modeling Boundary
 
 The AMPC controller is not the first implementation target, but the architecture must preserve these contracts:
