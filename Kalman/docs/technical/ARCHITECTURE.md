@@ -311,6 +311,73 @@ prior falls back to the last posterior (`x_post`).
 
 ---
 
+## Experiment Configuration (`estimation.run_config`)
+
+Task #006 adds a central configuration layer so that experiment parameters are
+never scattered as hard-coded constants.  Every run starts from an explicit
+``RunConfig`` object that is persisted atomically alongside the run row.
+
+### Module public API
+
+```python
+from estimation.run_config import (
+    RunConfig,           # frozen in-memory configuration object
+    ConfigFrozenError,   # raised on mutation attempts after run start
+    create_run,          # persist RunConfig → ExperimentRun + ExperimentConfig
+    load_config,         # reconstruct RunConfig from a saved run id
+    update_config,       # replace a pending run's config
+)
+```
+
+### `RunConfig` fields
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `name` | `"unnamed_run"` | Human-readable run label |
+| `dataset_source` | `""` | CSV path or MySQL query description |
+| `x0` … `alpha` | ADR-003 | Kalman parameters — validated via `KalmanConfig` |
+| `train_ratio` | 0.60 | Chronological split ratios (must sum to 1.0) |
+| `val_ratio` | 0.20 | |
+| `test_ratio` | 0.20 | |
+| `arx_na`, `arx_nb`, `arx_nk` | 2, 2, 1 | ARX model orders — validated via `ARXTrainConfig` |
+| `arx_input_cols` | all 6 sensor cols | Ordered tuple of ARX input column names |
+| `preprocessing_policy` | `"keep_last"` | `"keep_last"` / `"interpolate"` / `"skip"` |
+
+`RunConfig` is a **frozen dataclass**; mutation after construction raises
+`TypeError`.  Validation delegates to `KalmanConfig` and `ARXTrainConfig` for
+their respective fields, and adds `math.isfinite()` guards for all float fields.
+
+### v1 authorization model
+
+Configuration changes are blocked once `ExperimentRun.status` moves out of
+`"pending"`.  Calling `update_config()` on a non-pending run raises
+`ConfigFrozenError`.  There is no role-based auth in v1; this is a hard
+service-layer invariant documented as a TODO for future auth integration.
+
+### Persistence model
+
+```text
+RunConfig
+  │
+  ├── create_run()  ──► ExperimentRun  (status="pending")
+  │                       │
+  │                       └── ExperimentConfig (one-to-one)
+  │                               ├── structured columns (x0, P0, …)
+  │                               └── raw_config_json  (full JSON snapshot)
+  │
+  ├── load_config(run_id)  ◄── ExperimentConfig.from_experiment_config()
+  │
+  └── update_config(run_id, cfg)  ──► overwrites ExperimentConfig + refreshes JSON
+                                       raises ConfigFrozenError if not pending
+```
+
+`raw_config_json` stores a complete JSON snapshot of `RunConfig` so a saved
+row is fully self-describing.  `RunConfig.to_json()` / `from_json()` provide
+the round-trip.  `to_kalman_config()` and `to_arx_train_config()` extract the
+corresponding validated sub-configs for the estimation and prediction modules.
+
+---
+
 ## AMPC-Ready Modeling Boundary
 
 The AMPC controller is not the first implementation target, but the architecture must preserve these contracts:
