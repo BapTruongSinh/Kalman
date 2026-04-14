@@ -13,8 +13,6 @@ No task currently in progress.
 
 ## Up Next (prioritized)
 
-- [ ] #002 - Design experiment data model and storage plan [area: database] -> [.tasks/002-design-experiment-data-model.md](.tasks/002-design-experiment-data-model.md)
-- [ ] #003 - Implement offline dataset ingestion and preprocessing [area: backend] -> [.tasks/003-offline-dataset-ingestion-preprocessing.md](.tasks/003-offline-dataset-ingestion-preprocessing.md)
 - [ ] #004 - Create replaceable prediction adapter contract with ARX baseline [area: backend] -> [.tasks/004-arx-prediction-adapter.md](.tasks/004-arx-prediction-adapter.md)
 - [ ] #005 - Implement Adaptive Kalman-ready estimation cycle [area: backend] -> [.tasks/005-kalman-estimation-cycle.md](.tasks/005-kalman-estimation-cycle.md)
 
@@ -35,5 +33,7 @@ No task currently in progress.
 
 ## Completed
 
+- [x] #003 - Implement offline dataset ingestion and preprocessing -> [.tasks/003-offline-dataset-ingestion-preprocessing.md](.tasks/003-offline-dataset-ingestion-preprocessing.md)
+- [x] #002 - Design experiment data model and storage plan -> [.tasks/002-design-experiment-data-model.md](.tasks/002-design-experiment-data-model.md)
 - [x] #001 - Resolve Adaptive Kalman and AMPC v1 decisions -> [.tasks/001-resolve-v1-estimation-decisions.md](.tasks/001-resolve-v1-estimation-decisions.md)
 - [x] #000 - Initial project setup and template configuration -> [.tasks/000-initial-project-setup.md](.tasks/000-initial-project-setup.md)
