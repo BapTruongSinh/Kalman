@@ -36,7 +36,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Sequence
 
 from ..ingestion import ProcessedRecord
@@ -141,8 +141,10 @@ class KalmanState:
 class CycleResult:
     """Output for a single processed time step.
 
-    Field names mirror the ``PipelineCycle`` Django model columns (Task #002)
-    so the storage layer (Task #007) can map this directly.
+    Contains the Kalman subset needed to populate the ``PipelineCycle`` Django
+    model (Task #002).  The storage layer (Task #007) is responsible for
+    mapping these fields to the model's column names and adding run-level
+    metadata (``slice_type``, ``source_type``, ``created_at``, ``kf_`` prefixes, …).
 
     Attributes
     ----------
@@ -305,12 +307,18 @@ class AdaptiveKalmanCycle:
         except Exception as exc:  # noqa: BLE001
             logger.exception("KalmanCycle step %d raised unexpectedly", cycle_index)
             elapsed = (time.perf_counter() - t0) * 1000.0
+            # --- safe attribute extraction so error handler itself never raises ---
+            _sentinel = datetime(1970, 1, 1, tzinfo=timezone.utc)
+            _raw = getattr(record, "raw", None)
+            _ts: datetime = getattr(_raw, "timestamp", _sentinel)
+            _raw_sm: float | None = getattr(_raw, "soil_moisture", None)
+            _pre_status: str = getattr(record, "preprocess_status", "invalid")
             # State is NOT mutated in the error branch — keep last known good values.
             result = CycleResult(
-                timestamp=record.raw.timestamp,
+                timestamp=_ts,
                 cycle_index=cycle_index,
-                raw_soil_moisture=record.raw.soil_moisture,
-                preprocess_status=record.preprocess_status,
+                raw_soil_moisture=_raw_sm,
+                preprocess_status=_pre_status,
                 arx_predicted=None,
                 x_prior=self._state.x_post,
                 P_prior=self._state.P_post,
@@ -326,7 +334,12 @@ class AdaptiveKalmanCycle:
             )
 
         # Always advance history and step counter, regardless of outcome.
-        self._history.append(record)
+        # Guard against non-ProcessedRecord inputs so append itself can't raise.
+        if record is not None:
+            try:
+                self._history.append(record)
+            except Exception:  # noqa: BLE001
+                pass
         self._state.step += 1
         return result
 
@@ -372,12 +385,17 @@ class AdaptiveKalmanCycle:
         state = self._state
 
         # ── 1. Ask prediction adapter for next-step forecast ─────────────────
+        # Pass only the tail of history the adapter actually needs so replay
+        # stays O(n) rather than O(n²) for long sequences.
         arx_result: PredictionResult | None = None
         if self._adapter is not None:
             min_hist = getattr(self._adapter, "min_history_len", 0)
             if len(self._history) >= min_hist:
+                window = (
+                    self._history[-min_hist:] if min_hist > 0 else []
+                )
                 arx_result = self._adapter.predict(
-                    PredictionInput(history=list(self._history))
+                    PredictionInput(history=window)
                 )
 
         arx_predicted: float | None = (

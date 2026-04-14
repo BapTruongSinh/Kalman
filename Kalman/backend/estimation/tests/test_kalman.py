@@ -343,11 +343,14 @@ class TestAdaptiveKalmanCycleStep:
         assert result.P_posterior > 0.0
 
     def test_step_updates_state(self, estimator: AdaptiveKalmanCycle):
-        rec = _make_proc(0, sm=60.0)
-        estimator.step(rec, cycle_index=0)
+        """step() must mutate KalmanState fields consistently with CycleResult."""
+        rec = _make_proc(0, sm=65.0)  # sm differs from x0=0.0 → guarantees update
+        result = estimator.step(rec, cycle_index=0)
         state = estimator.state
-        assert state.x_post != estimator.config.x0 or True  # may be equal if x0==60.0
         assert state.step == 1
+        assert state.x_post == pytest.approx(result.x_posterior)
+        assert state.P_post == pytest.approx(result.P_posterior)
+        assert state.R == pytest.approx(result.R)
 
     def test_step_returns_correct_timestamp(self, estimator: AdaptiveKalmanCycle):
         rec = _make_proc(5, sm=60.0)
@@ -530,6 +533,37 @@ class TestAdapterIntegration:
         assert result.cycle_status == "ok"
         assert result.arx_predicted is None
 
+    def test_adapter_receives_window_not_full_history(self):
+        """Adapter must receive exactly min_history_len records, not the full history.
+
+        Sending the full growing history causes O(n²) work on long replays.
+        """
+        received_lengths: list[int] = []
+
+        class SpyAdapter:
+            model_kind = "spy"
+            is_trained = True
+            min_history_len = 3
+
+            def predict(self, inp: "PredictionInput") -> "PredictionResult":
+                from estimation.prediction import PredictionResult
+                received_lengths.append(len(inp.history))
+                return PredictionResult(value=60.0, status="ok", model_kind="spy")
+
+        from estimation.prediction import PredictionInput  # noqa: F401 (needed by SpyAdapter)
+
+        cfg = KalmanConfig(x0=60.0)
+        est = AdaptiveKalmanCycle(cfg, adapter=SpyAdapter())  # type: ignore[arg-type]
+        records = [_make_proc(i, sm=60.0 + i * 0.1) for i in range(10)]
+        est.replay(records)
+
+        # Every predict() call must receive exactly min_history_len records.
+        assert len(received_lengths) > 0, "SpyAdapter.predict() was never called"
+        assert all(n == SpyAdapter.min_history_len for n in received_lengths), (
+            f"Expected all window lengths == {SpyAdapter.min_history_len}, "
+            f"got: {received_lengths}"
+        )
+
 
 # ── TestCycleReplay ───────────────────────────────────────────────────────────
 
@@ -650,6 +684,29 @@ class TestNeverRaises:
             pytest.fail(f"replay raised after many missing: {exc}")
         assert all(r.cycle_status == "skipped_no_measurement" for r in results)
         assert all(math.isfinite(r.x_posterior) for r in results)
+
+    def test_step_with_none_record_never_raises(self):
+        """step(None) must return a CycleResult with cycle_status='error', not raise."""
+        cfg = KalmanConfig(x0=60.0)
+        est = AdaptiveKalmanCycle(cfg)
+        try:
+            result = est.step(None, cycle_index=0)  # type: ignore[arg-type]
+        except Exception as exc:
+            pytest.fail(f"step(None) raised: {exc}")
+        assert result.cycle_status == "error"
+        assert result.error_message is not None
+        assert math.isfinite(result.x_posterior)
+
+    def test_step_with_malformed_record_never_raises(self):
+        """step() with an arbitrary non-ProcessedRecord object must not raise."""
+        cfg = KalmanConfig(x0=60.0)
+        est = AdaptiveKalmanCycle(cfg)
+        try:
+            result = est.step(object(), cycle_index=0)  # type: ignore[arg-type]
+        except Exception as exc:
+            pytest.fail(f"step(object()) raised: {exc}")
+        assert result.cycle_status == "error"
+        assert math.isfinite(result.x_posterior)
 
 
 # ── TestRealData ──────────────────────────────────────────────────────────────
