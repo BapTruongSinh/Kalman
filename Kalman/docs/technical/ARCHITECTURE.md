@@ -378,6 +378,90 @@ corresponding validated sub-configs for the estimation and prediction modules.
 
 ---
 
+## Pipeline Storage (`estimation.pipeline`)
+
+Implemented in Task #007.  The storage layer sits between the Kalman estimation
+cycle and the database: it maps `CycleResult` objects to `PipelineCycle` rows
+and manages the `ExperimentRun` lifecycle.
+
+### Package layout
+
+```
+estimation/pipeline/
+    __init__.py   — public API re-exports
+    store.py      — mapping, bulk persistence, run lifecycle
+```
+
+### Public API
+
+| Symbol | Type | Purpose |
+|--------|------|---------|
+| `map_result_to_cycle` | pure function | Maps `CycleResult` + run metadata → unsaved `PipelineCycle` |
+| `bulk_save_cycles` | DB function | Batch-inserts unsaved `PipelineCycle` instances |
+| `begin_run` | DB function | Transitions `ExperimentRun` PENDING → RUNNING |
+| `end_run` | DB function | Transitions `ExperimentRun` RUNNING → COMPLETED / FAILED / ABORTED |
+| `RunStateError` | exception | Raised on invalid status transitions |
+
+### Field mapping — `CycleResult` → `PipelineCycle`
+
+| `CycleResult` field | `PipelineCycle` column | Notes |
+|---------------------|------------------------|-------|
+| `timestamp` | `sample_ts` | Source timestamp |
+| `cycle_index` | `cycle_index` | 0-based index within run |
+| `raw_soil_moisture` | `raw_soil_moisture` | From `CycleResult` (not `ProcessedRecord`) |
+| `preprocess_status` | `preprocess_status` | `"valid"` / `"kept_last"` / `"interpolated"` / `"skipped"` |
+| `arx_predicted` | `arx_predicted` | NULL when prediction unavailable |
+| `x_prior` | `kf_x_prior` | Prior estimate `x̂⁻ₖ` |
+| `P_prior` | `kf_P_prior` | Prior covariance `P̂⁻ₖ` |
+| `innovation` | `kf_innovation` | `eₖ = zₖ − x̂⁻ₖ`; NULL on skipped steps |
+| `R` | `kf_R` | Adaptive measurement noise `Rₖ` |
+| `K` | `kf_K` | Kalman gain `Kₖ`; NULL on skipped steps |
+| `x_posterior` | `kf_x_posterior` | Filtered estimate `x̂ₖ` |
+| `P_posterior` | `kf_P_posterior` | Updated covariance `Pₖ` |
+| `cycle_status` | `cycle_status` | `"ok"` / `"skipped_no_measurement"` / `"error"` |
+| `error_message` | `error_message` | Non-NULL only on `"error"` cycles |
+
+Run-level metadata (`run`, `slice_type`, `source_type`) is supplied by the caller
+as arguments to `map_result_to_cycle`.
+
+When a `ProcessedRecord` is passed as the optional `record` argument, the raw
+sensor readings (`raw_temperature`, `raw_humidity`, `raw_light`, `raw_drip`,
+`raw_mist`, `raw_fan`) are also populated for full traceability.
+
+### Run lifecycle
+
+```text
+create_run(cfg)               ──► ExperimentRun (status="pending")
+   │
+   ├── begin_run(run)         ──► status="running",  started_at=now()
+   │       raises RunStateError if not "pending"
+   │
+   ├── [bulk_save_cycles ×N]  ──► PipelineCycle rows in DB
+   │
+   └── end_run(run, status)   ──► status="completed"|"failed"|"aborted",
+           completed_at=now()      raises RunStateError if not "running"
+```
+
+Status transitions use a conditional `QuerySet.update` (one UPDATE query) so
+concurrent calls cannot silently corrupt state.
+
+### Traceability chain
+
+Every `PipelineCycle` row carries a FK to `ExperimentRun`, which in turn has a
+one-to-one `ExperimentConfig` with the full configuration snapshot.  Any cycle
+can therefore be traced to:
+
+* its raw input values (raw sensor columns)
+* its ARX prediction
+* all Kalman internals at that step
+* the exact configuration used (via `run.config`)
+
+Pipeline failures and skipped updates are stored as explicit rows with
+`cycle_status="error"` (+ non-null `error_message`) or
+`cycle_status="skipped_no_measurement"`, never silently dropped.
+
+---
+
 ## AMPC-Ready Modeling Boundary
 
 The AMPC controller is not the first implementation target, but the architecture must preserve these contracts:
