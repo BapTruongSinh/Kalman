@@ -708,6 +708,47 @@ class TestNeverRaises:
         assert result.cycle_status == "error"
         assert math.isfinite(result.x_posterior)
 
+    def test_step_with_exploding_raw_property_never_raises(self):
+        """step() must not raise when record.raw is a property that raises.
+
+        bare getattr(obj, 'raw', default) still invokes the descriptor and
+        forwards the exception; _safe_getattr() catches it and returns the
+        default instead.
+        """
+
+        class BadRaw:
+            @property
+            def raw(self):
+                raise RuntimeError("raw property exploded")
+
+        cfg = KalmanConfig(x0=60.0)
+        est = AdaptiveKalmanCycle(cfg)
+        try:
+            result = est.step(BadRaw(), cycle_index=0)  # type: ignore[arg-type]
+        except Exception as exc:
+            pytest.fail(f"step(BadRaw()) raised: {exc}")
+        assert result.cycle_status == "error"
+        assert math.isfinite(result.x_posterior)
+
+    def test_step_with_exploding_preprocess_status_property_never_raises(self):
+        """step() must not raise when record.preprocess_status is a property that raises."""
+
+        class BadPreprocess:
+            raw = None
+
+            @property
+            def preprocess_status(self):
+                raise RuntimeError("preprocess_status exploded")
+
+        cfg = KalmanConfig(x0=60.0)
+        est = AdaptiveKalmanCycle(cfg)
+        try:
+            result = est.step(BadPreprocess(), cycle_index=0)  # type: ignore[arg-type]
+        except Exception as exc:
+            pytest.fail(f"step(BadPreprocess()) raised: {exc}")
+        assert result.cycle_status == "error"
+        assert math.isfinite(result.x_posterior)
+
 
 # ── TestRealData ──────────────────────────────────────────────────────────────
 

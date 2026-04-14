@@ -44,6 +44,21 @@ from ..prediction import PredictionAdapter, PredictionInput, PredictionResult
 
 logger = logging.getLogger(__name__)
 
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _safe_getattr(obj: object, name: str, default: object) -> object:
+    """Return ``getattr(obj, name)`` or *default* — **never raises**.
+
+    Unlike bare ``getattr(obj, name, default)``, this catches exceptions
+    raised by descriptors/properties so that the Kalman error handler truly
+    cannot re-raise under any adversarial input.
+    """
+    try:
+        return getattr(obj, name, default)
+    except Exception:  # noqa: BLE001
+        return default
+
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -307,12 +322,12 @@ class AdaptiveKalmanCycle:
         except Exception as exc:  # noqa: BLE001
             logger.exception("KalmanCycle step %d raised unexpectedly", cycle_index)
             elapsed = (time.perf_counter() - t0) * 1000.0
-            # --- safe attribute extraction so error handler itself never raises ---
-            _sentinel = datetime(1970, 1, 1, tzinfo=timezone.utc)
-            _raw = getattr(record, "raw", None)
-            _ts: datetime = getattr(_raw, "timestamp", _sentinel)
-            _raw_sm: float | None = getattr(_raw, "soil_moisture", None)
-            _pre_status: str = getattr(record, "preprocess_status", "invalid")
+            # _safe_getattr wraps getattr in try/except so descriptor/property
+            # exceptions (BadRaw.raw raises RuntimeError, etc.) cannot escape.
+            _raw = _safe_getattr(record, "raw", None)
+            _ts: datetime = _safe_getattr(_raw, "timestamp", _EPOCH)  # type: ignore[assignment]
+            _raw_sm: float | None = _safe_getattr(_raw, "soil_moisture", None)  # type: ignore[assignment]
+            _pre_status: str = _safe_getattr(record, "preprocess_status", "invalid")  # type: ignore[assignment]
             # State is NOT mutated in the error branch — keep last known good values.
             result = CycleResult(
                 timestamp=_ts,
