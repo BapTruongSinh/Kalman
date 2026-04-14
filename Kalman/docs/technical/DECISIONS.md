@@ -73,11 +73,12 @@ ADR-001 still holds for the selected stack and the staged v1 delivery path, but 
 
 ### Decision
 
-Use option 3. v1 remains staged around dataset ingestion, preprocessing, prediction, Adaptive Kalman-ready estimation, storage, visualization, and evaluation. ARX remains the first prediction baseline, but prediction must be replaceable or comparable later with LightGBM/XGBoost. Estimator tasks must resolve a minimal Adaptive Kalman mechanism rather than treating adaptation as irrelevant. AMPC state, control, disturbance, cost, and safety contracts must be documented before controller implementation.
+Use option 3. v1 remains staged around dataset ingestion, preprocessing, prediction, Adaptive Kalman-ready estimation, storage, visualization, and evaluation. ARX remains the first prediction baseline, and it should be retrainable offline for a selected run rather than treated only as a fixed saved artifact. Prediction must remain replaceable or comparable later with LightGBM/XGBoost. Estimator tasks must resolve a minimal Adaptive Kalman mechanism rather than treating adaptation as irrelevant. AMPC state, control, disturbance, cost, and safety contracts must be documented before controller implementation.
 
 ### Consequences
 
 - **Positive**: The project now aligns with the owner's clarified topic; future AMPC work is less likely to require redesign; the final report can cite a coherent path from data to estimator to control design.
+- **Positive**: Explicit offline ARX retraining lets the project demonstrate a reproducible prediction baseline while keeping online retraining/model registry out of v1.
 - **Negative**: Task #001 becomes more important because it must choose a bounded adaptive-estimation rule and decide whether v1 includes an offline AMPC optimizer prototype.
 - **Neutral**: Full autonomous actuation remains gated until requirements explicitly promote it.
 
