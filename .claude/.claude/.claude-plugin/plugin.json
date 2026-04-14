@@ -1,0 +1,10 @@
+{
+  "name": "orchestrated-project-template",
+  "description": "Domain skills for the orchestrated multi-agent project template",
+  "version": "1.0.0",
+  "author": {
+    "name": "Josip Jelić",
+    "homepage": "https://github.com/josipjelic"
+  },
+  "keywords": ["agents", "orchestration", "template"]
+}

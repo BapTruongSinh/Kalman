@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Write-Output '[project-rule] Before acting, read .claude/.claude/rules/*.md, .claude/.claude/review/REVIEW.md, .claude/TODO.md, and relevant .claude/.tasks files.'\""
+          }
+        ]
+      }
+    ]
+  }
+}
