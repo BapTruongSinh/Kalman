@@ -15,15 +15,18 @@ For design tokens, component specs, and UX flows see DESIGN_SYSTEM.md.
 
 ## Overview
 
-The v1 system is a greenhouse state-estimation pipeline oriented toward Adaptive Kalman plus AMPC. It accepts either offline records from `../ARX/greenhouse_data.csv` or later live sensor records, validates and preprocesses those records, optionally retrains the ARX baseline offline for the selected run, asks a prediction adapter for a next-step prediction, uses the estimator module for an Adaptive Kalman-ready update with the real measurement, then stores and visualizes raw, predicted, and filtered values.
+The v1 system is an offline-first greenhouse state-estimation pipeline oriented toward Adaptive Kalman plus AMPC. It accepts replay records loaded from a time-series table or from the current CSV snapshot at `../ARX/greenhouse_data.csv`, validates and preprocesses those records, chronologically splits them into train/validation/test slices, optionally retrains the ARX baseline offline for the selected run, asks a prediction adapter for a next-step prediction, uses the estimator module for an Adaptive Kalman-ready update with the real measurement, then stores and visualizes raw, predicted, and filtered values.
 
-The core architectural decision is to keep v1 staged while preventing a wrong baseline-only design. Full closed-loop AMPC actuation and cloud-scale operations are postponed until the prediction plus Adaptive Kalman foundation is validated, but AMPC state/control/disturbance/cost/safety contracts must remain explicit.
+The core architectural decision is to keep v1 staged while preventing a wrong baseline-only design. The first estimator target is scalar `Soil_Moisture`, the minimal adaptive mechanism is bounded innovation-driven adaptive `R` with fixed-per-run `Q`, and full closed-loop AMPC actuation is postponed until the prediction plus Adaptive Kalman foundation is validated. AMPC state/control/disturbance/cost/safety contracts must remain explicit even though optimizer execution is out of scope for v1.
 
 ```text
-../ARX/greenhouse_data.csv or sensors
+MySQL query result or ../ARX/greenhouse_data.csv snapshot
         |
         v
 Ingestion + validation + preprocessing
+        |
+        v
+Chronological split + optional ARX retraining
         |
         v
 Prediction adapter
@@ -89,7 +92,7 @@ This section remains a template until the Django/backend implementation begins.
 2. Request validation for incoming sensor and experiment configuration payloads.
 3. Error handler for consistent pipeline and API errors.
 
-**Service layer pattern**: Keep preprocessing, prediction adapter, Adaptive Kalman-ready estimator, storage, evaluation, and future AMPC controller logic as separate modules.
+**Service layer pattern**: Keep preprocessing, split/replay orchestration, prediction adapter, Adaptive Kalman-ready estimator, storage, evaluation, and future AMPC controller logic as separate modules.
 
 ---
 
@@ -111,15 +114,17 @@ This section remains a template until the Django/backend implementation begins.
 ### Core v1 Estimation Flow
 
 ```text
-1. Load a row from ../ARX/greenhouse_data.csv or receive a sensor sample.
-2. Validate timestamp and variable fields.
-3. Apply preprocessing policy for missing, malformed, repeated, or out-of-range values.
-4. Send the validated state/history to the prediction adapter. ARX is the first retrainable offline baseline adapter.
-5. Use the ARX artifact for the current run to generate prediction output as the estimator prediction input.
-6. Run Adaptive Kalman-ready uncertainty propagation and measurement update.
-7. Store raw measurement, prediction output, filtered estimate, residual/innovation, covariance or adaptive status, timestamp, config, and status.
-8. Visualize raw, predicted, and filtered series.
-9. Produce evaluation metrics and report-ready exports.
+1. Load a time-series dataset from MySQL or from the current CSV snapshot.
+2. Sort by timestamp and apply chronological split: train 60%, validation 20%, test 20%.
+3. Validate timestamp and variable fields, then apply preprocessing policy for missing, malformed, repeated, or out-of-range values.
+4. Retrain or reload the ARX artifact from the train slice for the selected run.
+5. Use the validation slice to tune fixed-per-run parameters such as `Q` and preprocessing choices.
+6. Replay the frozen ARX plus Adaptive Kalman configuration on the held-out test slice.
+7. For each cycle, use ARX prediction as the estimator prior for scalar `Soil_Moisture`.
+8. Run bounded innovation-driven adaptive `R` update, Kalman gain calculation, and scalar measurement update.
+9. Store timestamp, raw measurement, prediction output, filtered estimate, innovation/residual, `P`, `R`, config, and status.
+10. Visualize raw, predicted, and filtered series.
+11. Produce held-out evaluation metrics and report-ready exports.
 ```
 
 ---
@@ -130,7 +135,7 @@ The AMPC controller is not the first implementation target, but the architecture
 
 | Concept | Candidate v1 meaning | Notes |
 |---------|----------------------|-------|
-| State | Soil moisture `theta` or root-zone depletion `Dr` | Task #001 chooses the first estimator target |
+| State | Estimation state = soil moisture `theta`; AMPC-ready control state = root-zone depletion `Dr` | v1 estimation is scalar `Soil_Moisture`; `Dr` stays documented for later controller synthesis |
 | Control input | Drip/pump seconds, mist seconds, fan duration/level | Full autonomous scheduling remains gated |
 | Disturbances | ET0/ETc, temperature, humidity, light | Use available dataset fields first |
 | Output | Soil moisture sensor and selected environment variables | Must stay traceable to raw measurements |
@@ -163,9 +168,10 @@ The canonical design system and UX flow summaries live in [`DESIGN_SYSTEM.md`](.
 
 ## Performance Considerations
 
-- Prediction plus Adaptive Kalman-ready update target: <= 500 ms per cycle, excluding explicit offline ARX retraining.
+- Prediction plus Adaptive Kalman-ready update target: <= 500 ms per cycle on replay, excluding explicit offline ARX retraining.
 - Dashboard/output update target: <= 5 seconds.
 - The pipeline should continue operating through short missing/noisy data windows.
+- Held-out replay must achieve at least 20% first-difference variance reduction with 30% as target, while filtered RMSE/MAE do not degrade more than 5% versus ARX prediction.
 
 ---
 
@@ -175,6 +181,6 @@ The canonical design system and UX flow summaries live in [`DESIGN_SYSTEM.md`](.
 |------|--------|------|
 | Node version not pinned | Local frontend results may vary across machines | Add `.nvmrc` or package engine constraint later |
 | AWS service not chosen | Deployment architecture remains incomplete | Decide AWS target before deployment task |
-| Adaptive Kalman variable and adaptive rule scope not finalized | Backend implementation may branch between single-variable, `Dr`, and covariance-adaptation approaches | Resolve in task #001 |
-| Storage format not finalized | Logging implementation may need MySQL plus CSV export or MySQL only | Resolve in task #001 and #002 |
-| AMPC controller implementation scope not finalized | Docs must preserve AMPC contracts without forcing full closed-loop actuation too early | Resolve in task #001 and task #013 |
+| Django/backend scaffolding not created yet | Architecture is agreed but implementation entrypoints are still missing | Create during backend tasks |
+| Storage schema details not finalized | Logging implementation still needs concrete table design and export policy | Resolve in task #002 |
+| AMPC controller implementation scope intentionally deferred | Docs must preserve AMPC contracts without forcing full closed-loop actuation too early | Keep deferred until after task #013 |
