@@ -52,18 +52,19 @@ The repository already includes ARX work, a greenhouse dataset, and additional r
 
 | Metric | Baseline | Target | How Measured |
 |--------|----------|--------|--------------|
-| Pipeline cycle success rate | TBD | >= 95% | Successful prediction-update cycles over valid samples |
-| Prediction + Adaptive Kalman-ready cycle latency | TBD | <= 500 ms | Timed execution under normal prototype conditions |
+| Replay pipeline completion | TBD | Full held-out replay completes without crash | Run the full replay pipeline once on the held-out test slice |
+| Prediction + Adaptive Kalman-ready cycle latency | TBD | <= 500 ms | Timed execution under normal prototype conditions, excluding explicit offline ARX retraining |
 | Output update delay | TBD | <= 5 seconds | Time from input arrival to display or log update |
 | Sample loss over long run | TBD | < 2% over 24 hours | Count missing or dropped samples over a long test run |
-| Variance reduction | Raw signal variance | 20-30% reduction | Compare raw vs filtered signal variance |
-| Residual stability | TBD | No persistent exploding behavior | Residual or innovation time-series analysis |
-| Adaptive estimator traceability | TBD | Adaptive status or rationale logged per affected cycle | Estimator diagnostics and configuration records |
+| High-frequency variation reduction | Raw first-difference variance | Pass >= 20%, target >= 30% | Compute `1 - var(diff(filtered)) / var(diff(raw))` on the held-out test slice |
+| Accuracy guardrail (RMSE) | ARX prediction on held-out test slice | `RMSE(filtered, raw) <= 1.05 * RMSE(predicted, raw)` | Compare filtered and ARX-predicted values against raw measurements on the held-out test slice |
+| Accuracy guardrail (MAE) | ARX prediction on held-out test slice | `MAE(filtered, raw) <= 1.05 * MAE(predicted, raw)` | Compare filtered and ARX-predicted values against raw measurements on the held-out test slice |
+| Innovation and covariance stability | TBD | No sustained exploding trend and no prolonged saturation at configured safety bounds | Inspect innovation/residual, `P`, and adaptive `R` time-series on the held-out test slice |
+| Adaptive estimator traceability | TBD | Every output row records timestamp, raw measurement, ARX prediction, filtered estimate, innovation/residual, `P`, `R`, and status | Stored experiment records and exported evaluation artifacts |
 | AMPC readiness | TBD | State/control/disturbance/cost/safety contract documented | Architecture and task acceptance review |
-| Visualization completeness | TBD | Raw, prediction output, and filtered curves viewable | Dashboard or generated plots |
-| Logging completeness | TBD | Raw measurement, prediction output, filtered estimate, timestamp, residual/innovation, adaptive status per cycle | Stored experiment records |
+| Visualization completeness | TBD | Raw, prediction output, and filtered curves viewable in generated plots and dashboard views | Plot and dashboard review |
 | Robustness to imperfect data | TBD | No full crash on short missing/noisy data | Missing/noisy-data test cases |
-| Reproducible evaluation | TBD | Same dataset and config regenerate consistent results | Replay `../ARX/greenhouse_data.csv` with saved config |
+| Reproducible evaluation | TBD | Same dataset/query result and config regenerate consistent results | Replay from MySQL or CSV snapshot with saved config |
 
 ---
 
@@ -199,18 +200,18 @@ The repository already includes ARX work, a greenhouse dataset, and additional r
 
 | # | Question | Owner | Status |
 |---|----------|-------|--------|
-| 1 | Which variables are included in Adaptive Kalman estimation first: soil moisture `theta`, root-zone depletion `Dr`, or soil moisture plus temperature and humidity? | Project owner | Open |
+| 1 | Which variables are included in Adaptive Kalman estimation first: soil moisture `theta`, root-zone depletion `Dr`, or soil moisture plus temperature and humidity? | Project owner | Answered: v1 estimates scalar `Soil_Moisture` first; `Dr` remains a documented AMPC-ready derived control state for later work. |
 | 2 | Is ARX used as a fixed prediction model, a retrained model, an offline-only reference model, or a baseline to compare against LightGBM/XGBoost? | Project owner | Answered: use ARX as an explicit offline retrainable baseline in v1; keep model adapter replaceable; leave LightGBM/XGBoost comparison for later unless explicitly added. |
 | 3 | Is `../ARX/greenhouse_data.csv` used for training, tuning, evaluation, or all three? | Project owner | Answered: use it for all three with chronological split; train ARX on train slice, tune/check on validation slice, and reserve test slice for final reported Kalman/ARX evaluation. |
-| 4 | Which minimal Adaptive Kalman mechanism is used in v1: bounded innovation-driven `Q`/`R` tuning, another adaptive rule, or an explicitly documented fallback? | Project owner | Open |
-| 5 | What initial state, initial covariance, process noise, and measurement noise should be used? | Project owner | Open |
-| 6 | Is v1 offline-first, real-time-first, or both from the start? | Project owner | Open |
-| 7 | Is mandatory visualization limited to generated plots or a full dashboard? | Project owner | Open |
-| 8 | What is the official storage format: MySQL only, CSV export, or both? | Project owner | Open |
-| 9 | What threshold counts as good enough Kalman performance beyond the suggested 20-30% variance reduction? | Project owner | Open |
-| 10 | Which exact AWS service will host the backend/dashboard later? | Project owner | Open |
-| 11 | Does v1 include only AMPC design artifacts/contracts, or also a minimal offline optimizer prototype? | Project owner | Open |
-| 12 | Which AMPC state equation is official first: soil-moisture model, FAO-56 root-zone depletion model, or ARX-driven state prediction? | Project owner | Open |
+| 4 | Which minimal Adaptive Kalman mechanism is used in v1: bounded innovation-driven `Q`/`R` tuning, another adaptive rule, or an explicitly documented fallback? | Project owner | Answered: v1 uses bounded innovation-driven adaptive `R`; `Q` stays fixed during a run and is selected by validation tuning. |
+| 5 | What initial state, initial covariance, process noise, and measurement noise should be used? | Project owner | Answered: `x0` = first observed `Soil_Moisture` in the selected run, `P0 = 1.0`, `Q` is tuned on validation with default `0.05`, `R0 = 1.0`, `R_min = 0.05`, `R_max = 25.0`, `alpha = 0.95`. |
+| 6 | Is v1 offline-first, real-time-first, or both from the start? | Project owner | Answered: v1 is offline-first on local replay; live ingestion remains a later extension under task #010. |
+| 7 | Is mandatory visualization limited to generated plots or a full dashboard? | Project owner | Answered: v1 requires both generated plots and dashboard views for raw, predicted, and filtered series. |
+| 8 | What is the official storage format: MySQL only, CSV export, or both? | Project owner | Answered: local source of truth is MySQL from XAMPP; CSV remains import/export and replay snapshot format, not the hard-coded storage model. |
+| 9 | What threshold counts as good enough Kalman performance beyond the suggested 20-30% variance reduction? | Project owner | Answered: on the held-out test slice, the pipeline must complete without crash, record full row-level traceability, keep innovation/`P`/`R` bounded, achieve at least 20% first-difference variance reduction with 30% as target, and keep filtered RMSE/MAE within 5% of ARX prediction. |
+| 10 | Which exact AWS service will host the backend/dashboard later? | Project owner | Deferred: not required for local v1; keep the owner as Project owner and decide during deployment planning. |
+| 11 | Does v1 include only AMPC design artifacts/contracts, or also a minimal offline optimizer prototype? | Project owner | Answered: v1 includes only AMPC-ready docs and contracts; no offline optimizer prototype is included. |
+| 12 | Which AMPC state equation is official first: soil-moisture model, FAO-56 root-zone depletion model, or ARX-driven state prediction? | Project owner | Answered: v1 estimation stays on `Soil_Moisture`, while the first AMPC-ready control-state equation is the FAO-56 root-zone depletion form `Dr_{k+1} = Dr_k + ETc_k - (eta Q / A) u_k`. |
 
 ---
 
@@ -220,3 +221,4 @@ The repository already includes ARX work, a greenhouse dataset, and additional r
 |------|--------|--------------------|
 | 2026-04-13 | Project owner / Codex onboarding | Initial v1 technical validation PRD based on `/start` onboarding answers |
 | 2026-04-14 | Project owner / Codex | Clarified direction toward Adaptive Kalman + AMPC and added AMPC-ready requirements |
+| 2026-04-14 | Project owner / Codex | Locked v1 decisions for estimator target, adaptive `R` rule, initialization defaults, offline-first replay flow, MySQL-plus-CSV-snapshot data policy, AMPC docs-only scope, and held-out test acceptance criteria |
