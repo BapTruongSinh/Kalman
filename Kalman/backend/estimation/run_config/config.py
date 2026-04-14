@@ -120,7 +120,13 @@ class RunConfig:
         # Coerce arx_input_cols to an immutable tuple regardless of what the caller
         # passed (list, generator, etc.).  Must be done via object.__setattr__
         # because the dataclass is frozen — direct assignment raises FrozenInstanceError.
-        object.__setattr__(self, "arx_input_cols", tuple(self.arx_input_cols))
+        try:
+            arx_input_cols = tuple(self.arx_input_cols)
+        except TypeError as exc:
+            raise ValueError(
+                "arx_input_cols must be an iterable of column names"
+            ) from exc
+        object.__setattr__(self, "arx_input_cols", arx_input_cols)
 
         # Delegate Kalman validation — reuses KalmanConfig's battle-tested checks.
         KalmanConfig(
@@ -206,9 +212,8 @@ class RunConfig:
             d = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise ValueError(f"Invalid JSON for RunConfig: {exc}") from exc
-        # Re-inflate tuple field.
-        if "arx_input_cols" in d:
-            d["arx_input_cols"] = tuple(d["arx_input_cols"])
+        if not isinstance(d, dict):
+            raise ValueError("RunConfig JSON must be an object")
         try:
             return cls(**d)
         except TypeError as exc:

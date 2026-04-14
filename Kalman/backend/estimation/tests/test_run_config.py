@@ -293,6 +293,17 @@ class TestRunConfigJSON:
         with pytest.raises(ValueError):
             RunConfig.from_json(json.dumps(d))
 
+    def test_from_json_non_object_raises_value_error(self):
+        with pytest.raises(ValueError, match="must be an object"):
+            RunConfig.from_json("[]")
+
+    def test_from_json_null_arx_input_cols_raises_value_error(self):
+        cfg = RunConfig()
+        d = json.loads(cfg.to_json())
+        d["arx_input_cols"] = None
+        with pytest.raises(ValueError, match="arx_input_cols"):
+            RunConfig.from_json(json.dumps(d))
+
 
 # ── TestRunConfigFromExperimentConfig ─────────────────────────────────────────
 
@@ -601,6 +612,10 @@ class TestArxInputColsCoercion:
         stub.raw_config_json = '{"arx_input_cols": ["Temperature", "Humidity"]}'
         cfg = RunConfig.from_experiment_config(stub)
         assert isinstance(cfg.arx_input_cols, tuple)
+
+    def test_none_input_raises_value_error(self):
+        with pytest.raises(ValueError, match="arx_input_cols"):
+            RunConfig(arx_input_cols=None)  # type: ignore[arg-type]
 
 
 # ── TestImportIsolation ───────────────────────────────────────────────────────
