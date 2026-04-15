@@ -7,8 +7,8 @@ Read by: Anyone defending v1 academically or extending toward AMPC
 
 # v1 Methodology — Adaptive Kalman Path and AMPC Boundary
 
-> Last updated: 2026-04-15  
-> Version: 1.0.0  
+> Last updated: 2026-04-15
+> Version: 1.0.0
 > Task reference: #012
 
 This note complements [`ARCHITECTURE.md`](./ARCHITECTURE.md) (components and data flow) and [`DECISIONS.md`](./DECISIONS.md) (ADRs). It states the **scientific story** v1 is meant to support: reproducible offline replay on greenhouse time series, ARX as an explicit baseline predictor, scalar Adaptive Kalman-style filtering with **adaptive measurement noise `R`**, and traceable evaluation — while **AMPC** remains a documented control contract, not an executed closed-loop optimizer in v1.
@@ -17,8 +17,8 @@ This note complements [`ARCHITECTURE.md`](./ARCHITECTURE.md) (components and dat
 
 ## 1. Data and reproducibility
 
-- **Primary offline dataset**: `../ARX/greenhouse_data.csv` (timestamped soil moisture, environment, and actuator fields). Same file + same persisted `RunConfig` (stored in `ExperimentConfig.raw_config_json`) must yield the same pipeline parameters; cycle-level outputs depend only on ingested rows and config.
-- **Ingestion**: `load_csv` normalises types, skips unparseable timestamps, and preserves row order after a defensive chronological sort before splitting.
+- **Primary offline dataset**: at repo root, `ARX/greenhouse_data.csv` (timestamped soil moisture, environment, and actuator fields). From `Kalman/backend/`, that file is `../../ARX/greenhouse_data.csv`. Same file + same persisted `RunConfig` (stored in `ExperimentConfig.raw_config_json`) must yield the same pipeline parameters; cycle-level outputs depend only on ingested rows and config.
+- **Ingestion**: `load_csv` normalises types, attaches **UTC** to parsed timestamps (naive CSV strings are interpreted as UTC for ORM compatibility), skips unparseable timestamps, and preserves row order after a defensive chronological sort before splitting.
 - **Chronological split**: default **60% / 20% / 20%** (`train` / `validation` / `test`) via `split_chronological`. ARX is trained on the **train** slice (and may report optional metrics on **validation**). Final acceptance metrics are interpreted on the **test** slice (ADR-003 gate); see evaluation section below.
 - **Live path** (optional): samples POSTed to `/api/ingest/samples/` append `PipelineCycle` rows for a `live` run; methodology is the same per-step estimator, with different provenance and idempotency rules (see [`API.md`](./API.md)).
 
@@ -28,7 +28,7 @@ This note complements [`ARCHITECTURE.md`](./ARCHITECTURE.md) (components and dat
 
 - **Role**: supply a **one-step-ahead** candidate for soil moisture before the Kalman measurement update, implementing `PredictionAdapter`.
 - **Model**: ARX(*nₐ*, *nᵦ*, *nₖ*) in **OLS** form on lagged outputs and inputs; defaults align with `RunConfig` / `ARXTrainConfig` (*nₐ* = 2, *nᵦ* = 2, *nₖ* = 1).
-- **Outputs** (`PredictionResult`): `prediction` (scalar), `status` (`ok` / `unavailable` / `error` — **never raises**), `model_kind` (`arx`), and `reason` when not `ok`.
+- **Outputs** (`PredictionResult`): predicted scalar in **`PredictionResult.value`** (`None` when unavailable), `status` (`ok` / `unavailable` / `error` — **never raises**), `model_kind` (`arx`), and `reason` when not `ok`.
 - **Traceability in storage**: each `PipelineCycle` stores `arx_predicted` alongside raw and filtered channels.
 
 ---

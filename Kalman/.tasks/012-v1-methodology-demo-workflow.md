@@ -26,7 +26,7 @@ Document the final v1 method and demo path so the project can be defended academ
 - [x] Technical docs explain prediction output, Adaptive Kalman update, residuals/innovations, adaptive status, and evaluation outputs.
 - [x] Technical docs explain AMPC-ready state/control/disturbance/cost/safety contracts, even if full closed-loop actuation is postponed.
 - [x] Out-of-scope later items are clearly listed without incorrectly excluding Adaptive Kalman or AMPC from the project topic.
-- [x] The documented workflow can reproduce results from `../ARX/greenhouse_data.csv`.
+- [x] The documented workflow can reproduce results from repo-root `ARX/greenhouse_data.csv`.
 
 ## Technical Notes
 

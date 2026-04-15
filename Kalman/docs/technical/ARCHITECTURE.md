@@ -17,12 +17,12 @@ For design tokens, component specs, and UX flows see DESIGN_SYSTEM.md.
 
 ## Overview
 
-The v1 system is an offline-first greenhouse state-estimation pipeline oriented toward Adaptive Kalman plus AMPC. It accepts replay records loaded from a time-series table or from the current CSV snapshot at `../ARX/greenhouse_data.csv`, validates and preprocesses those records, chronologically splits them into train/validation/test slices, optionally retrains the ARX baseline offline for the selected run, asks a prediction adapter for a next-step prediction, uses the estimator module for an Adaptive Kalman-ready update with the real measurement, then stores and visualizes raw, predicted, and filtered values.
+The v1 system is an offline-first greenhouse state-estimation pipeline oriented toward Adaptive Kalman plus AMPC. It accepts replay records loaded from a time-series table or from the current CSV snapshot at repo-root `ARX/greenhouse_data.csv`, validates and preprocesses those records, chronologically splits them into train/validation/test slices, optionally retrains the ARX baseline offline for the selected run, asks a prediction adapter for a next-step prediction, uses the estimator module for an Adaptive Kalman-ready update with the real measurement, then stores and visualizes raw, predicted, and filtered values.
 
 The core architectural decision is to keep v1 staged while preventing a wrong baseline-only design. The first estimator target is scalar `Soil_Moisture`, the minimal adaptive mechanism is bounded innovation-driven adaptive `R` with fixed-per-run `Q`, and full closed-loop AMPC actuation is postponed until the prediction plus Adaptive Kalman foundation is validated. AMPC state/control/disturbance/cost/safety contracts must remain explicit even though optimizer execution is out of scope for v1.
 
 ```text
-MySQL query result or ../ARX/greenhouse_data.csv snapshot
+MySQL query result or repo-root ARX/greenhouse_data.csv snapshot
         |
         v
 Ingestion + validation + preprocessing
@@ -630,7 +630,7 @@ The canonical design system and UX flow summaries live in [`DESIGN_SYSTEM.md`](.
 
 ## Testing and data robustness
 
-Automated coverage for bad or noisy inputs lives in `Kalman/backend/estimation/tests/test_pipeline_robustness.py` (task **#011**). It exercises CSV loading (including malformed numerics and skipped timestamp rows), `validate_batch` with explicit validation statuses and non-empty `reason` for out-of-range and suspicious-repeat cases, preprocessing policies (`keep_last`, `interpolate`, `skip`), and full `AdaptiveKalmanCycle.replay` on synthetic rows and on slices derived from `../ARX/greenhouse_data.csv` with injected defects. The suite asserts the pipeline does not crash, per-sample preprocess statuses stay in the allowed set, and cycle-level errors surface an `error_message` when `cycle_status == "error"`.
+Automated coverage for bad or noisy inputs lives in `Kalman/backend/estimation/tests/test_pipeline_robustness.py` (task **#011**). It exercises CSV loading (including malformed numerics and skipped timestamp rows), `validate_batch` with explicit validation statuses and non-empty `reason` for out-of-range and suspicious-repeat cases, preprocessing policies (`keep_last`, `interpolate`, `skip`), and full `AdaptiveKalmanCycle.replay` on synthetic rows and on slices derived from repo-root `ARX/greenhouse_data.csv` with injected defects. The suite asserts the pipeline does not crash, per-sample preprocess statuses stay in the allowed set, and cycle-level errors surface an `error_message` when `cycle_status == "error"`.
 
 Run: `python -m pytest estimation/tests/test_pipeline_robustness.py` from `Kalman/backend`.
 

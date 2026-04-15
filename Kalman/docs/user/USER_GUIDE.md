@@ -7,10 +7,10 @@ Read by: @qa-engineer
 
 # Adaptive Kalman + AMPC — User Guide (v1)
 
-> Last updated: 2026-04-15  
+> Last updated: 2026-04-15
 > Version: 0.3.0
 
-This guide explains how to **run the v1 demo**: view persisted experiments in the dashboard, optionally **replay `../ARX/greenhouse_data.csv` into MySQL** via a Django shell recipe, and where to read the **methodology** for academic defense.
+This guide explains how to **run the v1 demo**: view persisted experiments in the dashboard, optionally **replay `../../ARX/greenhouse_data.csv` into MySQL** (from `Kalman/backend/`) via a Django shell recipe, and where to read the **methodology** for academic defense.
 
 **Methodology (thesis / report narrative)**: [`../technical/METHODOLOGY_V1.md`](../technical/METHODOLOGY_V1.md)
 
@@ -23,7 +23,7 @@ This guide explains how to **run the v1 demo**: view persisted experiments in th
 | Python 3.10+ | Same major as backend tests |
 | Node.js + npm | For `Kalman/dashboard` (Vite) |
 | MySQL (e.g. XAMPP) | Backend `DATABASES` host from `Kalman/backend/.env` |
-| Dataset file | Repo path `ARX/greenhouse_data.csv` (from `Kalman/backend`, `../ARX/greenhouse_data.csv`) |
+| Dataset file | Repo root `ARX/greenhouse_data.csv`; from `Kalman/backend/` use `../../ARX/greenhouse_data.csv` |
 
 Install backend dependencies (from **`Kalman/backend/`**):
 
@@ -161,8 +161,8 @@ These prove the same public CSV path and pipeline stages; they use the **test** 
 From Django shell or application code (see `estimation.evaluation.reporter`):
 
 - `build_text_report(run_id)` — human-readable report including ADR-003 gate lines.
-- `export_to_csv(run_id, directory)` — metrics tables.
-- `export_plots(run_id, directory)` — PNG diagnostics if `matplotlib` imports cleanly.
+- `export_to_csv(run_id, output_path)` — metrics tables; `output_path` is a **file** path (e.g. `Path("reports") / "metrics.csv"`), not a directory.
+- `export_plots(run_id, output_dir)` — PNG diagnostics if `matplotlib` imports cleanly (`output_dir` is a directory).
 
 ---
 
@@ -176,7 +176,7 @@ See [`../technical/METHODOLOGY_V1.md`](../technical/METHODOLOGY_V1.md) §4 and p
 
 | Symptom | Check |
 |---------|--------|
-| `FileNotFoundError` on CSV | Path relative to `Kalman/backend` → `../ARX/greenhouse_data.csv` |
+| `FileNotFoundError` on CSV | Path relative to `Kalman/backend/` → `../../ARX/greenhouse_data.csv` (repo root `ARX/…`) |
 | Dashboard empty | No completed runs in dev DB — run §4 or insert fixtures |
 | `RunStateError` on `begin_run` | Run must be `pending`; only one successful `begin_run` per run |
 | `matplotlib` / NumPy errors on `export_plots` | Optional dependency; upgrade/downgrade pair or skip plots |
@@ -186,6 +186,6 @@ See [`../technical/METHODOLOGY_V1.md`](../technical/METHODOLOGY_V1.md) §4 and p
 
 ## 9. Academic pointers
 
-1. **What we implemented**: offline replayable estimation with ARX + adaptive-**R** Kalman layer, MySQL traceability, dashboard visualization, automated evaluation (task #005–#009, #011).  
-2. **What we document for AMPC**: state / control / disturbance / cost / safety **contracts** (task #013 extends synthesis).  
+1. **What we implemented**: offline replayable estimation with ARX + adaptive-**R** Kalman layer, MySQL traceability, dashboard visualization, automated evaluation (task #005–#009, #011).
+2. **What we document for AMPC**: state / control / disturbance / cost / safety **contracts** (task #013 extends synthesis).
 3. **What we defer**: closed-loop MPC solve and production control — **not** “dropping AMPC from the project”, only deferring **implementation**.

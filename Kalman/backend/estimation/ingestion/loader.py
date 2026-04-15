@@ -1,7 +1,8 @@
 """
 CSV loader for greenhouse dataset.
 
-Reads ``../ARX/greenhouse_data.csv`` (or any compatible file) into a list of
+Reads a greenhouse CSV (e.g. repo ``ARX/greenhouse_data.csv``; from
+``Kalman/backend`` use ``../../ARX/greenhouse_data.csv``) into a list of
 :class:`RawRecord` dataclasses, then provides a :func:`split_chronological`
 helper for 60/20/20 train/validation/test slices.
 
@@ -20,7 +21,7 @@ from __future__ import annotations
 import csv
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -125,7 +126,9 @@ def load_csv(path: Path | str) -> list[RawRecord]:
         for line_no, row in enumerate(reader):
             raw_ts = row.get("Timestamp", "").strip()
             try:
-                ts = datetime.strptime(raw_ts, _TS_FORMAT)
+                # Naive CSV times are treated as UTC so ORM DateTimeField(use_tz=True)
+                # does not emit a warning per row when persisting PipelineCycle.sample_ts.
+                ts = datetime.strptime(raw_ts, _TS_FORMAT).replace(tzinfo=timezone.utc)
             except ValueError:
                 logger.warning(
                     "Row %d: unparseable timestamp %r — skipped",

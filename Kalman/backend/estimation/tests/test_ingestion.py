@@ -17,7 +17,7 @@ Covers:
 Run from Kalman/backend/:
     pytest estimation/tests/test_ingestion.py -v
 
-The real dataset (../ARX/greenhouse_data.csv) is a required fixture in this
+The real dataset (`ARX/greenhouse_data.csv` at repo root) is a required fixture in this
 repository.  Tests that depend on it call pytest.fail() — not pytest.skip() —
 when the file is absent so that CI surfaces the problem immediately.
 To run without it, remove/exclude the TestLoadCSV.test_loads_real_dataset and
@@ -33,7 +33,7 @@ automatically cleaned up by pytest even when an assertion fails mid-test.
 from __future__ import annotations
 
 import csv
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -62,7 +62,7 @@ CSV_PATH = _REPO_ROOT / "ARX" / "greenhouse_data.csv"
 
 _DATASET_REQUIRED_MSG = (
     f"Required dataset not found: {CSV_PATH}. "
-    "Ensure ../ARX/greenhouse_data.csv is present in the repository."
+    "Ensure ARX/greenhouse_data.csv is present at the repository root."
 )
 
 
@@ -133,7 +133,9 @@ class TestLoadCSV:
             pytest.fail(_DATASET_REQUIRED_MSG)
         records = load_csv(CSV_PATH)
         assert records[0].soil_moisture == pytest.approx(58.0)
-        assert records[0].timestamp == datetime(2025, 1, 1, 0, 0, 0)
+        assert records[0].timestamp == datetime(
+            2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc
+        )
 
     def test_raises_file_not_found(self):
         with pytest.raises(FileNotFoundError):

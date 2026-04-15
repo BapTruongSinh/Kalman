@@ -245,7 +245,7 @@ Return `EvaluationSummary` metrics for each data slice of a run.
 
 ### Input Sample
 
-Expected fields, based on `../ARX/greenhouse_data.csv`:
+Expected fields, based on repo-root `ARX/greenhouse_data.csv`:
 
 | Field | Required | Notes |
 |-------|----------|-------|
@@ -270,10 +270,10 @@ Expected fields, based on `../ARX/greenhouse_data.csv`:
 
 | Field | Required | Notes |
 |-------|----------|-------|
-| `prediction` | Yes | Next-step predicted state or output |
-| `status` | Yes | Prediction status |
+| `value` | Yes | Next-step predicted `Soil_Moisture`; `null` when unavailable |
+| `status` | Yes | `ok` / `unavailable` / `error` |
 | `model_kind` | Yes | `arx`; future-compatible with LightGBM/XGBoost |
-| `config_id` | Yes | Prediction configuration or model reference |
+| `reason` | Yes | Explanation when `status` is not `ok`; empty string on success |
 
 ### Adaptive Kalman-ready Estimator Result
 
@@ -315,6 +315,6 @@ DRF returns standard 404/500 responses using the `detail` key.
 
 | Method | Path | Purpose | Status |
 |--------|------|---------|--------|
-| `POST` | `/api/runs/replay` | Start replay from `../ARX/greenhouse_data.csv` | TBD |
+| `POST` | `/api/runs/replay` | Start replay from repo-root `ARX/greenhouse_data.csv` | TBD |
 | `GET` | `/api/runs/{id}` | Get run metadata and status | TBD |
 | `POST` | `/api/samples` | Submit a live sensor sample | TBD |
