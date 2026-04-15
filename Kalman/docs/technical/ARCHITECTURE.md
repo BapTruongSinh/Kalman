@@ -595,7 +595,7 @@ The AMPC controller is not the first implementation target, but the architecture
 | Cost terms | Zone/range tracking, water/energy penalty, actuator switching, `Delta u` smoothing | Documented before optimizer implementation |
 | Safety constraints | Soil moisture bounds, RH max, daily water cap, no mist at high RH/night, sensor-fault fallback | Required for later AMPC control design |
 
-For the current research synthesis, see [`ADAPTIVE_KALMAN_AMPC_NOTES.md`](./ADAPTIVE_KALMAN_AMPC_NOTES.md).
+For the current research synthesis, see [`ADAPTIVE_KALMAN_AMPC_NOTES.md`](./ADAPTIVE_KALMAN_AMPC_NOTES.md). For the **implementation-ready AMPC handoff** (state / control / disturbances / cost / safety / Kalman interface, FR-025–FR-027), see [`AMPC_MODELING_HANDOFF.md`](./AMPC_MODELING_HANDOFF.md).
 
 ---
 
@@ -644,4 +644,4 @@ Run: `python -m pytest estimation/tests/test_pipeline_robustness.py` from `Kalma
 | AWS service not chosen | Deployment architecture remains incomplete | Decide AWS target before deployment task |
 | Django/backend scaffolding not created yet | Architecture is agreed but implementation entrypoints are still missing | Create during backend tasks |
 | Storage schema details not finalized | Logging implementation still needs concrete table design and export policy | Resolve in task #002 |
-| AMPC controller implementation scope intentionally deferred | Docs must preserve AMPC contracts without forcing full closed-loop actuation too early | Keep deferred until after task #013 |
+| AMPC controller **code** still deferred | Contracts + handoff doc complete in task **#013**; closed-loop optimiser remains future work | Implement controller only after v1 estimation evidence and calibrated plant/water models |

@@ -187,5 +187,5 @@ See [`../technical/METHODOLOGY_V1.md`](../technical/METHODOLOGY_V1.md) §4 and p
 ## 9. Academic pointers
 
 1. **What we implemented**: offline replayable estimation with ARX + adaptive-**R** Kalman layer, MySQL traceability, dashboard visualization, automated evaluation (task #005–#009, #011).
-2. **What we document for AMPC**: state / control / disturbance / cost / safety **contracts** (task #013 extends synthesis).
+2. **What we document for AMPC**: state / control / disturbance / cost / safety **contracts** — see [`../technical/AMPC_MODELING_HANDOFF.md`](../technical/AMPC_MODELING_HANDOFF.md) (task #013).
 3. **What we defer**: closed-loop MPC solve and production control — **not** “dropping AMPC from the project”, only deferring **implementation**.

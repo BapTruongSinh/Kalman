@@ -294,7 +294,7 @@ ORDER BY r.completed_at DESC;
 
 | Item | Owner | Status |
 |------|-------|--------|
-| AMPC-ready derived columns (`Dr`, `ETc`, `ET0`) | task #013 | Deferred; add in a later migration once #013 finalizes the control-state contract |
+| AMPC-ready derived columns (`Dr`, `ETc`, `ET0`) | task #013 | **Contract** documented in [`AMPC_MODELING_HANDOFF.md`](./AMPC_MODELING_HANDOFF.md); **schema** still deferred until a controller phase needs persisted ET/Dr series |
 | Live sensor multi-source schema extension | task #010 | Deferred; `source_type` column is already present for forward compatibility |
 | CSV export stored procedure or management command | task #008 | Planned as part of evaluation/report export |
 
@@ -305,4 +305,5 @@ ORDER BY r.completed_at DESC;
 | Date | Author | Change |
 |------|--------|--------|
 | 2026-04-13 | Codex | Initial placeholder schema overview created during onboarding |
+| 2026-04-15 | Cursor | Open item AMPC columns: contract finalized in `AMPC_MODELING_HANDOFF.md` (task #013); schema migration unchanged deferred. |
 | 2026-04-14 | Codex | Full schema designed for task #002: five tables, all columns, indexes, query patterns, storage decision, and open items |

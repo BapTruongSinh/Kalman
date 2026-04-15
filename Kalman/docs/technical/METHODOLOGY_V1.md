@@ -69,10 +69,10 @@ v1 **does** include Adaptive Kalman estimation as the on-ramp to later **AMPC** 
 | **State** | Scalar soil moisture estimate \(\theta\); AMPC-oriented **root-zone depletion `Dr`** documented as a future derived state | `Dr` not estimated in v1 code |
 | **Control** | Drip / mist / fan actuators as eventual decision variables | Actuator columns ingested for traceability; **no MPC solver** |
 | **Disturbances** | Temperature, humidity, light (and related fields) as exogenous inputs | Used in ARX / stored on cycles |
-| **Cost** | Zone tracking, water/energy, smoothing penalties | **Contracts only** — see [`ADAPTIVE_KALMAN_AMPC_NOTES.md`](./ADAPTIVE_KALMAN_AMPC_NOTES.md) |
+| **Cost** | Zone tracking, water/energy, smoothing penalties | **Contracts only** — see [`ADAPTIVE_KALMAN_AMPC_NOTES.md`](./ADAPTIVE_KALMAN_AMPC_NOTES.md) and the quantitative handoff [`AMPC_MODELING_HANDOFF.md`](./AMPC_MODELING_HANDOFF.md) |
 | **Safety** | RH caps, moisture bounds, mist/night rules, sensor-fault fallback | **Contracts + estimator robustness**; no enforced plant-wide safety solver |
 
-For synthesis of research notes vs frozen decisions, cross-read [`DECISIONS.md`](./DECISIONS.md) and [`ADAPTIVE_KALMAN_AMPC_NOTES.md`](./ADAPTIVE_KALMAN_AMPC_NOTES.md).
+For synthesis of research notes vs frozen decisions, cross-read [`DECISIONS.md`](./DECISIONS.md), [`ADAPTIVE_KALMAN_AMPC_NOTES.md`](./ADAPTIVE_KALMAN_AMPC_NOTES.md), and [`AMPC_MODELING_HANDOFF.md`](./AMPC_MODELING_HANDOFF.md).
 
 ---
 
@@ -100,3 +100,4 @@ The following are **intentionally excluded from v1 deliverables** but remain **i
 | [`API.md`](./API.md) | REST shapes for runs, series, metrics, live ingest |
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | Module boundaries, `CycleResult` mapping, evaluation pipeline |
 | [`DATABASE.md`](./DATABASE.md) | ORM tables and evaluation column semantics |
+| [`AMPC_MODELING_HANDOFF.md`](./AMPC_MODELING_HANDOFF.md) | AMPC state / control / cost / safety synthesis (task #013) |
