@@ -174,11 +174,17 @@ class TestRunSeriesView:
         assert all(d["slice_type"] == "train" for d in data)
         assert len(data) == 3
 
-    def test_invalid_slice_returns_all(self, client, run):
+    def test_invalid_slice_returns_400(self, client, run):
         for i in range(4):
             _cycle(run, i)
         resp = client.get(f"/api/runs/{run.pk}/series/?slice=bogus")
-        assert resp.json()["total_cycles"] == 4
+        assert resp.status_code == 400
+        assert "slice" in resp.json().get("error", "")
+
+    def test_limit_stride_product_too_large_returns_400(self, client, run):
+        resp = client.get(f"/api/runs/{run.pk}/series/?limit=10000&stride=1000")
+        assert resp.status_code == 400
+        assert "limit * stride" in resp.json().get("error", "")
 
     def test_limit_param_respected(self, client, run):
         for i in range(10):

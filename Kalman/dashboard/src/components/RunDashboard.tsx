@@ -30,7 +30,9 @@ function filterBySlice(data: CyclePoint[], slice: SliceOption): CyclePoint[] {
 }
 
 export function RunDashboard({ runId }: Props) {
-  const [slice, setSlice] = useState<SliceOption>('all')
+  // Default to train: backend "all" without slice is capped by limit and skews
+  // toward low cycle_index (mostly train in chronological splits).
+  const [slice, setSlice] = useState<SliceOption>('train')
   const [stride, setStride] = useState<number>(1)
 
   const seriesKey = ['series', runId, slice, stride]

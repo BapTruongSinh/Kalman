@@ -1,7 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { fetchRuns, fetchSeries, fetchMetrics } from '../api/client'
 
-const RUNS = [{ id: 1, name: 'run-1', run_type: 'offline_replay', status: 'completed', created_at: '2024-01-01T00:00:00Z', dataset_source: null }]
+const RUNS = [{ id: 1, name: 'run-1', run_type: 'offline_replay', status: 'completed', created_at: '2024-01-01T00:00:00Z' }]
 
 const SERIES_RESP = {
   run_id: 1,

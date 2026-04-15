@@ -5,7 +5,6 @@ export interface RunSummary {
   run_type: string
   status: string
   created_at: string
-  dataset_source: string | null
 }
 
 /** One PipelineCycle row as returned by GET /api/runs/:id/series/ */

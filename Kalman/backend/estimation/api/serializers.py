@@ -6,9 +6,11 @@ from estimation.models import EvaluationSummary, ExperimentRun, PipelineCycle
 
 
 class RunListSerializer(serializers.ModelSerializer):
+    """Run list for the dashboard API — omits ``dataset_source`` (path exposure)."""
+
     class Meta:
         model = ExperimentRun
-        fields = ["id", "name", "run_type", "status", "created_at", "dataset_source"]
+        fields = ["id", "name", "run_type", "status", "created_at"]
 
 
 class CycleSerializer(serializers.ModelSerializer):

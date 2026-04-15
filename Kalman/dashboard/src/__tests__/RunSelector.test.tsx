@@ -13,7 +13,6 @@ const RUNS: RunSummary[] = [
     run_type: 'offline_replay',
     status: 'completed',
     created_at: '2024-01-01T00:00:00Z',
-    dataset_source: null,
   },
   {
     id: 2,
@@ -21,7 +20,6 @@ const RUNS: RunSummary[] = [
     run_type: 'offline_replay',
     status: 'failed',
     created_at: '2024-01-02T00:00:00Z',
-    dataset_source: null,
   },
 ]
 

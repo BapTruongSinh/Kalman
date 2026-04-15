@@ -8,9 +8,11 @@ Read by: @frontend-developer and @qa-engineer
 # API Reference
 
 > **Base URL (dev)**: `http://127.0.0.1:8000/api`
-> **Authentication**: Dashboard endpoints are public (local dev). The live ingestion endpoint at `/api/ingest/samples/` requires a **DRF Token** (`Authorization: Token <token>`).
+> **Authentication**: Dashboard `GET` endpoints default to **AllowAny** (explicit in DRF settings). Set `DASHBOARD_REQUIRE_AUTH=true` for production-style deployments so all dashboard routes require an authenticated user or token. The live ingestion endpoint at `/api/ingest/samples/` always requires a **DRF Token** (`Authorization: Token <token>`).
 > **Content-Type**: `application/json`
 > **Last updated**: 2026-04-15
+
+**Security / deployment**: With `DJANGO_ENV=production`, `DJANGO_SECRET_KEY` is **required** (the process will not start without it). Production also enables `SecurityMiddleware`, CSRF, `XFrameOptionsMiddleware`, session middleware, and secure cookie / HSTS / SSL-redirect flags (see `.env.example`). Run `python manage.py check --deploy` after exporting production env vars.
 
 **Pipeline semantics** (ARX vs Kalman roles, innovation/residual meaning, adaptive `R`, evaluation gates, AMPC contracts): see [`METHODOLOGY_V1.md`](./METHODOLOGY_V1.md). This file focuses on **HTTP shapes** and field lists.
 
@@ -128,8 +130,7 @@ List the 50 most-recent experiment runs, ordered newest first.
     "name": "replay-2024-01",
     "run_type": "offline_replay",
     "status": "completed",
-    "created_at": "2024-01-01T00:00:00Z",
-    "dataset_source": null
+    "created_at": "2024-01-01T00:00:00Z"
   }
 ]
 ```
@@ -141,7 +142,7 @@ List the 50 most-recent experiment runs, ordered newest first.
 | `run_type` | string | `offline_replay` or `live` |
 | `status` | string | `pending` / `running` / `completed` / `failed` |
 | `created_at` | ISO-8601 datetime | |
-| `dataset_source` | string \| null | Path / URL of source dataset |
+| `dataset_source` | *(not returned)* | Omitted from this JSON to avoid exposing filesystem paths on open networks; the column remains in the database for provenance. |
 
 ---
 
@@ -153,9 +154,9 @@ Return `PipelineCycle` time-series rows for a single run.
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
-| `slice` | string | *(all)* | Filter to `train`, `validation`, or `test` |
-| `limit` | int | `2000` | Max rows returned (hard cap `10000`) |
-| `stride` | int | `1` | Return every Nth cycle (for downsampling) |
+| `slice` | string | *(omit)* | If present, must be exactly `train`, `validation`, or `test`. Invalid values → `400`. Omit to include all slices. |
+| `limit` | int | `2000` | Max rows returned (hard cap `10000`, minimum `1`) |
+| `stride` | int | `1` | Return every Nth cycle (max `1000`). Product `limit × stride` must be ≤ **100 000** or the server returns `400` (DoS guard). |
 
 **Response** `200 OK`
 

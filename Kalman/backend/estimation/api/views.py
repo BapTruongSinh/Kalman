@@ -9,9 +9,11 @@ GET /api/runs/{run_id}/series/
     Return PipelineCycle time-series data for a run.
 
     Query params:
-        slice  -- one of "train", "validation", "test" (default: all)
+        slice  -- optional; if present must be ``train``, ``validation``, or ``test``.
+                  Omit for all slices.
         limit  -- max rows returned (default 2 000, max 10 000; must be >= 1)
-        stride -- sample every Nth cycle for large datasets (default 1; must be >= 1)
+        stride -- sample every Nth cycle (default 1; max 1 000). ``limit * stride``
+                  must not exceed 100 000 (DoS guard).
 
 GET /api/runs/{run_id}/metrics/
     Return EvaluationSummary metrics for each data slice of a run.
@@ -35,6 +37,8 @@ _VALID_SLICES = frozenset({"train", "validation", "test"})
 _DEFAULT_LIMIT = 2_000
 _MAX_LIMIT = 10_000
 _MAX_STRIDE = 1_000
+# Cap rows considered when stride > 1 (prevents limit * stride scans up to 10M IDs).
+_MAX_LIMIT_STRIDE_PRODUCT = 100_000
 
 
 def _parse_positive_int(raw: str, default: int, max_value: int) -> tuple[int, str | None]:
@@ -79,11 +83,37 @@ class RunSeriesView(APIView):
         if stride_err:
             return Response({"error": f"stride: {stride_err}"}, status=status.HTTP_400_BAD_REQUEST)
 
-        slice_type = request.query_params.get("slice", None)
+        product = limit * stride
+        if product > _MAX_LIMIT_STRIDE_PRODUCT:
+            return Response(
+                {
+                    "error": (
+                        f"limit * stride must be <= {_MAX_LIMIT_STRIDE_PRODUCT} "
+                        f"(got {product}). Reduce limit or stride."
+                    )
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if "slice" in request.query_params:
+            raw_slice = (request.query_params.get("slice") or "").strip().lower()
+            if raw_slice not in _VALID_SLICES:
+                return Response(
+                    {
+                        "error": (
+                            "slice: must be one of train, validation, test "
+                            f"(got {request.query_params.get('slice')!r}). Omit slice for all slices."
+                        )
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            slice_type: str | None = raw_slice
+        else:
+            slice_type = None
 
         # -- Build queryset ---------------------------------------------------
         qs = PipelineCycle.objects.filter(run=run).order_by("cycle_index")
-        if slice_type in _VALID_SLICES:
+        if slice_type is not None:
             qs = qs.filter(slice_type=slice_type)
 
         total = qs.count()
