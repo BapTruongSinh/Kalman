@@ -8,7 +8,7 @@ For design tokens, component specs, and UX flows see DESIGN_SYSTEM.md.
 
 # System Architecture
 
-> Last updated: 2026-04-14
+> Last updated: 2026-04-15
 > Version: 0.2.0
 
 ---
@@ -623,6 +623,14 @@ The canonical design system and UX flow summaries live in [`DESIGN_SYSTEM.md`](.
 - Dashboard/output update target: <= 5 seconds.
 - The pipeline should continue operating through short missing/noisy data windows.
 - Held-out replay must achieve at least 20% first-difference variance reduction with 30% as target, while filtered RMSE/MAE do not degrade more than 5% versus ARX prediction.
+
+---
+
+## Testing and data robustness
+
+Automated coverage for bad or noisy inputs lives in `Kalman/backend/estimation/tests/test_pipeline_robustness.py` (task **#011**). It exercises CSV loading (including malformed numerics and skipped timestamp rows), `validate_batch` with explicit validation statuses and non-empty `reason` for out-of-range and suspicious-repeat cases, preprocessing policies (`keep_last`, `interpolate`, `skip`), and full `AdaptiveKalmanCycle.replay` on synthetic rows and on slices derived from `../ARX/greenhouse_data.csv` with injected defects. The suite asserts the pipeline does not crash, per-sample preprocess statuses stay in the allowed set, and cycle-level errors surface an `error_message` when `cycle_status == "error"`.
+
+Run: `python -m pytest estimation/tests/test_pipeline_robustness.py` from `Kalman/backend`.
 
 ---
 
