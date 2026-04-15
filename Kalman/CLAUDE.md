@@ -93,5 +93,6 @@ TODO.md
 - `docs/technical/ADAPTIVE_KALMAN_AMPC_NOTES.md`
 - `docs/technical/API.md`
 - `docs/technical/DATABASE.md`
+- `docs/technical/METHODOLOGY_V1.md`
 - `docs/user/USER_GUIDE.md`
 - `docs/content/CONTENT_STRATEGY.md`

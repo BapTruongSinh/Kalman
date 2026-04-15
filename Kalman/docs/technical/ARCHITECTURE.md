@@ -11,6 +11,8 @@ For design tokens, component specs, and UX flows see DESIGN_SYSTEM.md.
 > Last updated: 2026-04-15
 > Version: 0.2.0
 
+**v1 methodology & demo (academic narrative, AMPC boundary, evaluation story)**: [`METHODOLOGY_V1.md`](./METHODOLOGY_V1.md) — companion to this document. **Operator runbook** (servers, dashboard, CSV replay shell recipe): [`../user/USER_GUIDE.md`](../user/USER_GUIDE.md).
+
 ---
 
 ## Overview

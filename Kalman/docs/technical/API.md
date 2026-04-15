@@ -12,6 +12,8 @@ Read by: @frontend-developer and @qa-engineer
 > **Content-Type**: `application/json`
 > **Last updated**: 2026-04-15
 
+**Pipeline semantics** (ARX vs Kalman roles, innovation/residual meaning, adaptive `R`, evaluation gates, AMPC contracts): see [`METHODOLOGY_V1.md`](./METHODOLOGY_V1.md). This file focuses on **HTTP shapes** and field lists.
+
 ---
 
 ## Live Ingestion Endpoint (Task #010)
