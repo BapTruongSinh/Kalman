@@ -158,7 +158,7 @@ These prove the same public CSV path and pipeline stages; they use the **test** 
 
 - Install dev tools: `pip install -r requirements-dev.txt`
 - **Dependency audit**: `pip-audit -r requirements.txt` (expect “No known vulnerabilities” or upgrade pins from the report).
-- **Django deploy checks** (after exporting real production env, including a long `DJANGO_SECRET_KEY`): `python manage.py check --deploy`. See `Kalman/backend/.env.example` for `DJANGO_ENV=production`, CORS, CSRF trusted origins, and `DASHBOARD_REQUIRE_AUTH`.
+- **Django deploy checks** (after exporting real production env, including a long `DJANGO_SECRET_KEY`): `python manage.py check --deploy`. See `Kalman/backend/.env.example` for `DJANGO_ENV=production`, CORS (comma or whitespace separated origins), CSRF trusted origins, and `DASHBOARD_REQUIRE_AUTH` (defaults **on** in production; set `false` only if reads must stay public).
 - After pulling backend changes that add `django.contrib.sessions`, run `python manage.py migrate` once so MySQL has the `django_session` table.
 
 ---

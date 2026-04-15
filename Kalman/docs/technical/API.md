@@ -8,11 +8,11 @@ Read by: @frontend-developer and @qa-engineer
 # API Reference
 
 > **Base URL (dev)**: `http://127.0.0.1:8000/api`
-> **Authentication**: Dashboard `GET` endpoints default to **AllowAny** (explicit in DRF settings). Set `DASHBOARD_REQUIRE_AUTH=true` for production-style deployments so all dashboard routes require an authenticated user or token. The live ingestion endpoint at `/api/ingest/samples/` always requires a **DRF Token** (`Authorization: Token <token>`).
+> **Authentication**: With `DJANGO_ENV=production`, dashboard `GET` endpoints default to **IsAuthenticated** unless you set `DASHBOARD_REQUIRE_AUTH=false` explicitly. In `development`, they default to **AllowAny** unless `DASHBOARD_REQUIRE_AUTH=true`. The live ingestion endpoint at `/api/ingest/samples/` always requires a **DRF Token** (`Authorization: Token <token>`).
 > **Content-Type**: `application/json`
 > **Last updated**: 2026-04-15
 
-**Security / deployment**: With `DJANGO_ENV=production`, `DJANGO_SECRET_KEY` is **required** (the process will not start without it). Production also enables `SecurityMiddleware`, CSRF, `XFrameOptionsMiddleware`, session middleware, and secure cookie / HSTS / SSL-redirect flags (see `.env.example`). Run `python manage.py check --deploy` after exporting production env vars.
+**Security / deployment**: With `DJANGO_ENV=production`, `DJANGO_SECRET_KEY` is **required** (the process will not start without it). Dashboard read APIs default to **authenticated** users unless `DASHBOARD_REQUIRE_AUTH=false`. Production also enables `SecurityMiddleware`, CSRF, `XFrameOptionsMiddleware`, session middleware, and secure cookie / HSTS / SSL-redirect flags (see `.env.example`). `CORS_ALLOWED_ORIGINS` accepts comma- or whitespace-separated URLs. Run `python manage.py check --deploy` after exporting production env vars.
 
 **Pipeline semantics** (ARX vs Kalman roles, innovation/residual meaning, adaptive `R`, evaluation gates, AMPC contracts): see [`METHODOLOGY_V1.md`](./METHODOLOGY_V1.md). This file focuses on **HTTP shapes** and field lists.
 

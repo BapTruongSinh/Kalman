@@ -14,4 +14,10 @@ import django
 import os
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+# Predictable defaults for the suite: a local .env with DJANGO_ENV=production
+# would otherwise default DASHBOARD_REQUIRE_AUTH on and break unauthenticated
+# APIClient tests. Explicit exports in the shell still win (setdefault).
+os.environ.setdefault("DJANGO_ENV", "development")
+os.environ.setdefault("DASHBOARD_REQUIRE_AUTH", "false")
+
 django.setup()

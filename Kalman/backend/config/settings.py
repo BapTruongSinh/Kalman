@@ -4,9 +4,11 @@ Django settings for the Adaptive Kalman pipeline backend.
 Usage
 -----
 - Copy ``.env.example`` to ``.env`` and set ``DJANGO_SECRET_KEY``, DB_* variables.
-- **Local / v1 demo**: ``DJANGO_ENV=development`` (default) — DEBUG on, permissive CORS.
+- **Local / v1 demo**: ``DJANGO_ENV=development`` (default) — DEBUG on, permissive CORS,
+  dashboard API defaults to **AllowAny** unless ``DASHBOARD_REQUIRE_AUTH`` is set.
 - **Production / v2 public**: ``DJANGO_ENV=production`` — ``DJANGO_SECRET_KEY`` is
-  **mandatory** (no dev fallback); secure cookies / HSTS / SSL redirect follow env flags.
+  **mandatory**; dashboard read endpoints default to **IsAuthenticated** unless you
+  set ``DASHBOARD_REQUIRE_AUTH=false`` explicitly (e.g. internal-only network).
 
 Verification::
 
@@ -15,9 +17,15 @@ Verification::
 """
 
 import os
+import re
 from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
+
+
+def _split_csv_or_whitespace(value: str) -> list[str]:
+    """Split env lists on commas and/or whitespace (backward-compatible)."""
+    return [p.strip() for p in re.split(r"[\s,]+", value.strip()) if p.strip()]
 
 # --- Paths ---
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -98,7 +106,7 @@ if IS_PRODUCTION:
 
     _csrf_origins = os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").strip()
     if _csrf_origins:
-        CSRF_TRUSTED_ORIGINS = [o.strip() for o in _csrf_origins.split(",") if o.strip()]
+        CSRF_TRUSTED_ORIGINS = _split_csv_or_whitespace(_csrf_origins)
 
 # --- Applications ---
 INSTALLED_APPS = [
@@ -127,10 +135,12 @@ MIDDLEWARE = [
 ROOT_URLCONF = "config.urls"
 
 # --- Django REST Framework ---
-_REQUIRE_AUTH = (
-    os.environ.get("DASHBOARD_REQUIRE_AUTH", "false").strip().lower()
-    in ("1", "true", "yes")
-)
+# Default: require auth on dashboard GET APIs in production only (fail-safe deploy).
+_dash_auth_raw = os.environ.get("DASHBOARD_REQUIRE_AUTH")
+if _dash_auth_raw is None:
+    _REQUIRE_AUTH = IS_PRODUCTION
+else:
+    _REQUIRE_AUTH = _dash_auth_raw.strip().lower() in ("1", "true", "yes")
 
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": [
@@ -153,7 +163,7 @@ REST_FRAMEWORK = {
 # --- CORS ---
 _cors_origins = os.environ.get("CORS_ALLOWED_ORIGINS", "")
 if _cors_origins:
-    CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_origins.split(",") if o.strip()]
+    CORS_ALLOWED_ORIGINS = _split_csv_or_whitespace(_cors_origins)
 else:
     CORS_ALLOW_ALL_ORIGINS = DEBUG
 

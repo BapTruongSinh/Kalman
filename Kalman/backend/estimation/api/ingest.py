@@ -12,9 +12,10 @@ step, persists the ``PipelineCycle`` row, and returns the filtered estimate.
 Design notes
 ------------
 Authentication
-    DRF ``TokenAuthentication``.  Only this endpoint requires a token —
-    existing read-only dashboard views remain unauthenticated so the
-    dashboard is unaffected.
+    DRF ``TokenAuthentication``.  This endpoint always requires a token.
+    Read-only dashboard ``GET`` APIs follow ``DASHBOARD_REQUIRE_AUTH`` /
+    ``DEFAULT_PERMISSION_CLASSES`` in Django settings (production defaults
+    to authenticated users unless explicitly opened).
 
     Provision a token::
 
@@ -153,7 +154,7 @@ def _normalize_sample_ts(ts: datetime) -> datetime:
     """Return *ts* as timezone-aware UTC (naïve values are treated as UTC)."""
     if ts.tzinfo is None:
         return ts.replace(tzinfo=timezone.utc)
-    return ts
+    return ts.astimezone(timezone.utc)
 
 
 def _live_ingest_response_body(

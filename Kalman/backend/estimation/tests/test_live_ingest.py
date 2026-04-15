@@ -33,10 +33,14 @@ from django.urls import reverse
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from estimation.models import ExperimentConfig, ExperimentRun, PipelineCycle
-from estimation.api.ingest import _restore_state, _build_raw_record
+from estimation.api.ingest import (
+    _build_raw_record,
+    _normalize_sample_ts,
+    _restore_state,
+)
 from estimation.pipeline.store import ingest_dedupe_key_for_persist
 from estimation.ingestion.loader import RawRecord
 from estimation.ingestion.preprocessor import preprocess_single
@@ -505,6 +509,24 @@ def test_preprocess_single_preserves_raw_reference():
     processed = preprocess_single(raw, vr)
     assert processed.raw is raw
     assert processed.validation is vr
+
+
+# ── _normalize_sample_ts (pure) ───────────────────────────────────────────────
+
+
+def test_normalize_sample_ts_naive_is_utc():
+    ts = datetime(2026, 4, 14, 12, 0, 0)
+    out = _normalize_sample_ts(ts)
+    assert out.tzinfo == timezone.utc
+    assert out == datetime(2026, 4, 14, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def test_normalize_sample_ts_offset_converts_to_utc():
+    tz_plus_7 = timezone(timedelta(hours=7))
+    ts = datetime(2026, 4, 14, 19, 0, 0, tzinfo=tz_plus_7)
+    out = _normalize_sample_ts(ts)
+    assert out.tzinfo == timezone.utc
+    assert out == datetime(2026, 4, 14, 12, 0, 0, tzinfo=timezone.utc)
 
 
 # ── _restore_state unit tests (pure, no DB) ───────────────────────────────────
