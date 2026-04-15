@@ -7,9 +7,9 @@ Read by: Anyone implementing MPC beyond v1 estimation
 
 # AMPC Modeling Handoff — State, Cost, and Safety (v1 → v2)
 
-> Last updated: 2026-04-15  
-> Version: 1.0.0  
-> Task: #013  
+> Last updated: 2026-04-15
+> Version: 1.0.0
+> Task: #013
 > Normative product refs: **FR-025**, **FR-026**, **FR-027** (`PRD.md`)
 
 This note is the **implementation-ready synthesis** of AMPC-oriented material from:
@@ -114,6 +114,7 @@ J = \sum_{i=1}^{P} \Big(
 + \underbrace{\lambda_e\, \psi_e(u_{k+i})}_{\text{energy / fan}}
 + \underbrace{\lambda_{sw}\,\psi_{sw}(u_{k+i},u_{k+i-1})}_{\text{actuator switching}}
 + \underbrace{\|u_{k+i}-u_{k+i-1}\|^2_{W}}_{\Delta u \text{ smoothing}}
+\Big)
 \]
 
 | Term | Intent | Notes |
