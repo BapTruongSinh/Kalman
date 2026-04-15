@@ -17,6 +17,7 @@ from estimation.models import (
     ExperimentRun,
     PipelineCycle,
 )
+from estimation.pipeline.store import ingest_dedupe_key_for_persist
 
 
 @pytest.fixture
@@ -39,10 +40,18 @@ def _ts(offset_seconds: int = 0) -> datetime.datetime:
 
 
 def _cycle(run: ExperimentRun, index: int, slice_type: str = "test") -> PipelineCycle:
+    ts = _ts(index)
+    dedupe = ingest_dedupe_key_for_persist(
+        run.pk,
+        PipelineCycle.SourceType.CSV_REPLAY,
+        cycle_index=index,
+        sample_ts=ts,
+    )
     return PipelineCycle.objects.create(
         run=run,
         cycle_index=index,
-        sample_ts=_ts(index),
+        sample_ts=ts,
+        ingest_dedupe_key=dedupe,
         slice_type=slice_type,
         raw_soil_moisture=50.0 + index * 0.1,
         arx_predicted=50.1 + index * 0.1,

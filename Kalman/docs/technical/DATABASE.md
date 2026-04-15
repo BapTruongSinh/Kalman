@@ -132,6 +132,7 @@ One row per processed time step within a run. The core data table. Every filtere
 | `run_id` | INT | No | — | FK → `experiment_runs.id` |
 | `sample_ts` | DATETIME | No | — | Source timestamp from dataset; Django `DateTimeField` maps to DATETIME without explicit sub-second precision |
 | `cycle_index` | INT | No | — | Sequential 0-based index within the run |
+| `ingest_dedupe_key` | VARCHAR(191) | No | — | Stable idempotency string per run (live: UTC timestamp; replay: zero-padded `cycle_index`). Enforced with `uq_cycles_run_ingest_dedupe` so MySQL does not rely on partial unique indexes |
 | `slice_type` | VARCHAR(15) | No | — | Django choices: `train`, `validation`, `test` |
 | `source_type` | VARCHAR(20) | No | `'csv_replay'` | Django choices: `csv_replay`, `mysql_replay`, `live` |
 | **Raw measurements** | | | | |
@@ -162,6 +163,8 @@ One row per processed time step within a run. The core data table. Every filtere
 **Constraints / Indexes**:
 - PRIMARY KEY (`id`)
 - UNIQUE `uq_cycles_run_index` (`run_id`, `cycle_index`) — one cycle per index per run; also serves as the sequential-replay index
+- UNIQUE `uq_cycles_run_ingest_dedupe` (`run_id`, `ingest_dedupe_key`) — at most one row per run per dedupe key (live: one sample per UTC timestamp; replay: keyed by `cycle_index` so CSV rows may share `sample_ts`)
+- **Migration `0005` data repair**: if legacy duplicate rows share the same dedupe key with identical raw sensors, they are auto-removed **only when that duplicate group is at the tail of the run** (no row in the run has a higher `cycle_index` than the group’s max). If later cycles exist, migrate aborts with a clear error so the run can be replayed or rebuilt instead of leaving Kalman state inconsistent.
 - INDEX `idx_cycles_run_ts` (`run_id`, `sample_ts`) — time-series retrieval per run
 - INDEX `idx_cycles_run_slice` (`run_id`, `slice_type`) — slice-level queries and metrics
 

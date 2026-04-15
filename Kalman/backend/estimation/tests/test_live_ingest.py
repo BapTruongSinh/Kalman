@@ -21,7 +21,8 @@ Coverage
 * validate_live_record pure unit tests.
 * _restore_state pure unit tests.
 * Authorization: only ExperimentRun.owner's token may ingest (403 otherwise).
-* Idempotent retries: duplicate (run_id, timestamp) → 200 with idempotent flag.
+* Idempotent retries: duplicate (run_id, timestamp) + same sensors → 200;
+  same timestamp but different sensors → 409.
 """
 
 from __future__ import annotations
@@ -32,8 +33,11 @@ from django.urls import reverse
 from rest_framework.authtoken.models import Token
 from rest_framework.test import APIClient
 
+from datetime import datetime, timezone
+
 from estimation.models import ExperimentConfig, ExperimentRun, PipelineCycle
 from estimation.api.ingest import _restore_state, _build_raw_record
+from estimation.pipeline.store import ingest_dedupe_key_for_persist
 from estimation.ingestion.loader import RawRecord
 from estimation.ingestion.preprocessor import preprocess_single
 from estimation.ingestion.validator import ValidationResult
@@ -170,6 +174,26 @@ def test_duplicate_timestamp_returns_200_idempotent(auth_client, payload, live_r
     assert body2["cycle_index"] == body1["cycle_index"]
     assert body2["kf_x_posterior"] == body1["kf_x_posterior"]
     assert PipelineCycle.objects.filter(run=live_run).count() == 1
+
+
+@pytest.mark.django_db
+def test_duplicate_timestamp_different_payload_returns_409(
+    auth_client, payload, live_run
+):
+    """Same timestamp with different sensor values must not be treated as idempotent."""
+    r1 = auth_client.post(_INGEST_URL, payload, format="json")
+    assert r1.status_code == 201
+    payload2 = {
+        **payload,
+        "soil_moisture": 50.0,
+        "humidity": 66.0,
+    }
+    r2 = auth_client.post(_INGEST_URL, payload2, format="json")
+    assert r2.status_code == 409
+    assert r2.json().get("code") == "duplicate_timestamp_payload_mismatch"
+    assert PipelineCycle.objects.filter(run=live_run).count() == 1
+    row = PipelineCycle.objects.get(run=live_run)
+    assert row.raw_soil_moisture == 45.3
 
 
 # ── Happy path ─────────────────────────────────────────────────────────────────
@@ -393,10 +417,18 @@ def test_state_reconstructed_from_previous_cycle(auth_client, payload, live_run)
 def test_reconnect_after_error_cycle_resets_state(auth_client, payload, live_run):
     """If last cycle has null kf fields (error), state resets from config → still 201."""
     # Manually insert an error cycle with null Kalman fields
+    ts = datetime(2026, 4, 14, 11, 59, 0, tzinfo=timezone.utc)
+    dedupe = ingest_dedupe_key_for_persist(
+        live_run.pk,
+        PipelineCycle.SourceType.LIVE,
+        cycle_index=0,
+        sample_ts=ts,
+    )
     PipelineCycle.objects.create(
         run=live_run,
-        sample_ts="2026-04-14T11:59:00Z",
+        sample_ts=ts,
         cycle_index=0,
+        ingest_dedupe_key=dedupe,
         slice_type=PipelineCycle.SliceType.TRAIN,
         source_type=PipelineCycle.SourceType.LIVE,
         cycle_status=PipelineCycle.CycleStatus.ERROR,

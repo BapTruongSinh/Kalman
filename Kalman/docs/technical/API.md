@@ -1,4 +1,4 @@
-﻿<!--
+<!--
 DOCUMENT METADATA
 Owner: @backend-developer
 Update trigger: Any API endpoint or pipeline contract is added, modified, or removed
@@ -10,7 +10,7 @@ Read by: @frontend-developer and @qa-engineer
 > **Base URL (dev)**: `http://127.0.0.1:8000/api`
 > **Authentication**: Dashboard endpoints are public (local dev). The live ingestion endpoint at `/api/ingest/samples/` requires a **DRF Token** (`Authorization: Token <token>`).
 > **Content-Type**: `application/json`
-> **Last updated**: 2026-04-14
+> **Last updated**: 2026-04-15
 
 ---
 
@@ -69,7 +69,9 @@ python manage.py drf_create_token <username>
 
 **Response `200 OK` (idempotent retry)**
 
-The same `run_id` and `timestamp` may only produce one live `PipelineCycle`. A duplicate POST (e.g. client retry after timeout) returns `200` with the same body as the original cycle plus `"idempotent": true`. The Kalman step is **not** applied again.
+The same `run_id` and `timestamp` may only produce one live `PipelineCycle` row. A duplicate POST with the **same sensor payload** (all optional channels match what was stored, including `null`) — e.g. client retry after timeout — returns `200` with the same body as the original cycle plus `"idempotent": true`. The Kalman step is **not** applied again.
+
+If the same `timestamp` is sent again with **different** sensor values, the server responds with **`409 Conflict`** and does not overwrite the stored row.
 
 ```json
 {
@@ -101,7 +103,7 @@ The same `run_id` and `timestamp` may only produce one live `PipelineCycle`. A d
 | `401 Unauthorized` | Missing or invalid auth token |
 | `403 Forbidden` | Authenticated user is not the run `owner`, or the run has no `owner` set |
 | `404 Not Found` | `run_id` not found, or run is not of `live` type |
-| `409 Conflict` | Run is not in `running` status (pending / completed / failed) |
+| `409 Conflict` | Run is not in `running` status (pending / completed / failed), **or** same `timestamp` already ingested with different sensor values (`code`: `duplicate_timestamp_payload_mismatch`) |
 
 **Authorization**: Assign `ExperimentRun.owner` to the device user (same account as the DRF token). Only that user may POST samples for the run.
 

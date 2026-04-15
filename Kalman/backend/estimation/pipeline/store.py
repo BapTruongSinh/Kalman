@@ -37,6 +37,39 @@ logger = logging.getLogger(__name__)
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
+def ingest_dedupe_key_for_persist(
+    run_id: int,
+    source_type: str,
+    *,
+    cycle_index: int,
+    sample_ts: datetime | None = None,
+) -> str:
+    """Build a MySQL-safe unique key for ``PipelineCycle.ingest_dedupe_key``.
+
+    Partial ``UNIQUE`` indexes (``WHERE source_type='live'``) are not emitted on
+    some MySQL configurations, so we use an explicit string key instead.
+
+    * **live** — ``live|{run_id}|{UTC ISO-8601 timestamp}`` — at most one live
+      row per run per sensor timestamp (idempotent retries).
+    * **csv_replay / mysql_replay** — ``csv|…`` / ``mysql|…`` plus zero-padded
+      ``cycle_index`` — CSV rows may share ``sample_ts`` within a run.
+    """
+    if source_type == PipelineCycle.SourceType.LIVE:
+        if sample_ts is None:
+            raise ValueError("ingest_dedupe_key_for_persist: sample_ts required for live")
+        ts = sample_ts
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        else:
+            ts = ts.astimezone(timezone.utc)
+        return f"live|{run_id}|{ts.isoformat()}"
+    if source_type == PipelineCycle.SourceType.CSV_REPLAY:
+        return f"csv|{run_id}|{cycle_index:010d}"
+    if source_type == PipelineCycle.SourceType.MYSQL_REPLAY:
+        return f"mysql|{run_id}|{cycle_index:010d}"
+    raise ValueError(f"unsupported source_type {source_type!r}")
+
+
 def _require_choice(value: str, choices: type, field: str) -> str:
     """Validate *value* against a TextChoices class; raise ``ValueError`` if invalid.
 
@@ -140,10 +173,18 @@ def map_result_to_cycle(
 
     raw = record.raw if record is not None else None
 
+    dedupe_key = ingest_dedupe_key_for_persist(
+        run.pk,
+        source_type,
+        cycle_index=result.cycle_index,
+        sample_ts=result.timestamp,
+    )
+
     return PipelineCycle(
         run=run,
         sample_ts=result.timestamp,
         cycle_index=result.cycle_index,
+        ingest_dedupe_key=dedupe_key,
         slice_type=slice_type,
         source_type=source_type,
         # ── Raw measurements ──────────────────────────────────────────────────

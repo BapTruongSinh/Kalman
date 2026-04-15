@@ -285,6 +285,16 @@ class PipelineCycle(models.Model):
 
     created_at = models.DateTimeField(auto_now_add=True)
 
+    # MySQL-compatible dedupe: partial unique indexes are unreliable; see
+    # ingest_dedupe_key + uq_cycles_run_ingest_dedupe in Meta.constraints.
+    ingest_dedupe_key = models.CharField(
+        max_length=191,
+        help_text=(
+            "Stable key for DB uniqueness: live=run+UTC timestamp; "
+            "replay=run+cycle_index (allows duplicate sample_ts in CSV)."
+        ),
+    )
+
     class Meta:
         db_table = "pipeline_cycles"
         constraints = [
@@ -292,12 +302,9 @@ class PipelineCycle(models.Model):
                 fields=["run", "cycle_index"],
                 name="uq_cycles_run_index",
             ),
-            # Live only: one row per (run, sample_ts). CSV/MySQL replay may repeat
-            # timestamps within a run; live ingestion uses this for idempotent retries.
             models.UniqueConstraint(
-                fields=["run", "sample_ts"],
-                condition=models.Q(source_type="live"),
-                name="uq_cycles_run_live_sample_ts",
+                fields=["run", "ingest_dedupe_key"],
+                name="uq_cycles_run_ingest_dedupe",
             ),
             models.CheckConstraint(
                 check=models.Q(slice_type__in=["train", "validation", "test"]),

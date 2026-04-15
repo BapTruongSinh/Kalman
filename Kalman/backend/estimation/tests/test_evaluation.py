@@ -840,10 +840,20 @@ def cycle_factory(run):
     ) -> PipelineCycle:
         from datetime import timedelta
 
+        from estimation.pipeline.store import ingest_dedupe_key_for_persist
+
+        sample_ts = _ts + timedelta(minutes=index)
+        dedupe = ingest_dedupe_key_for_persist(
+            run.pk,
+            PipelineCycle.SourceType.CSV_REPLAY,
+            cycle_index=index,
+            sample_ts=sample_ts,
+        )
         return PipelineCycle.objects.create(
             run=run,
-            sample_ts=_ts + timedelta(minutes=index),
+            sample_ts=sample_ts,
             cycle_index=index,
+            ingest_dedupe_key=dedupe,
             slice_type=slice_type,
             source_type="csv_replay",
             raw_soil_moisture=raw_sm,

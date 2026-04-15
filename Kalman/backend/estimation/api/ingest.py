@@ -59,7 +59,7 @@ from ..ingestion.validator import validate_live_record
 from ..kalman import AdaptiveKalmanCycle
 from ..kalman.cycle import KalmanConfig, KalmanState
 from ..models import ExperimentConfig, ExperimentRun, PipelineCycle
-from ..pipeline.store import map_result_to_cycle
+from ..pipeline.store import ingest_dedupe_key_for_persist, map_result_to_cycle
 from .live_serializers import LiveSampleSerializer
 
 logger = logging.getLogger(__name__)
@@ -195,6 +195,22 @@ def _response_from_pipeline_cycle(
     )
 
 
+def _nullable_float_equal(a: float | None, b: float | None) -> bool:
+    if a is None and b is None:
+        return True
+    if a is None or b is None:
+        return False
+    return float(a) == float(b)
+
+
+def _live_sensor_payload_matches(data: dict, cycle: PipelineCycle) -> bool:
+    """True if validated request *data* matches stored ``raw_*`` columns on *cycle*."""
+    for field in _SENSOR_FIELDS:
+        if not _nullable_float_equal(data.get(field), getattr(cycle, f"raw_{field}")):
+            return False
+    return True
+
+
 def _build_raw_record(data: dict, row_index: int) -> RawRecord:
     """Convert validated serializer data to a :class:`~..ingestion.loader.RawRecord`.
 
@@ -244,14 +260,16 @@ class LiveIngestView(APIView):
     **Responses**:
 
     * ``201 Created`` — sample accepted; body contains filtered estimate.
-    * ``200 OK`` — same ``run_id`` + ``timestamp`` was already ingested; body is
-      the existing cycle (``"idempotent": true``). Safe for transport retries.
+    * ``200 OK`` — same ``run_id`` + ``timestamp`` **and** identical sensor
+      payload was already ingested; body is the existing cycle
+      (``"idempotent": true``). Safe for transport retries.
     * ``400 Bad Request`` — invalid payload (missing required fields, wrong types).
     * ``401 Unauthorized`` — missing or invalid token.
     * ``403 Forbidden`` — authenticated user is not the run ``owner``, or the
       live run has no ``owner`` assigned (ingestion disabled until one is set).
     * ``404 Not Found`` — ``run_id`` does not exist or is not a live run.
-    * ``409 Conflict`` — run exists but is not in ``"running"`` status.
+    * ``409 Conflict`` — run is not ``"running"``, **or** the same ``timestamp``
+      was already ingested with a **different** sensor payload (cannot overwrite).
     """
 
     authentication_classes = [TokenAuthentication]
@@ -343,19 +361,31 @@ class LiveIngestView(APIView):
                 kalman_config = KalmanConfig()
 
             sample_ts = _normalize_sample_ts(data["timestamp"])
-            existing_live = (
-                PipelineCycle.objects.filter(
-                    run=run,
-                    source_type=PipelineCycle.SourceType.LIVE,
-                    sample_ts=sample_ts,
-                )
-                .order_by("cycle_index")
-                .first()
+            dedupe_key = ingest_dedupe_key_for_persist(
+                run.pk,
+                PipelineCycle.SourceType.LIVE,
+                cycle_index=0,
+                sample_ts=sample_ts,
             )
+            existing_live = PipelineCycle.objects.filter(
+                run=run,
+                ingest_dedupe_key=dedupe_key,
+            ).first()
             if existing_live is not None:
+                if _live_sensor_payload_matches(data, existing_live):
+                    return Response(
+                        _response_from_pipeline_cycle(existing_live, idempotent=True),
+                        status=status.HTTP_200_OK,
+                    )
                 return Response(
-                    _response_from_pipeline_cycle(existing_live, idempotent=True),
-                    status=status.HTTP_200_OK,
+                    {
+                        "error": (
+                            "A sample with this timestamp was already ingested "
+                            "with different sensor values; refusing to overwrite."
+                        ),
+                        "code": "duplicate_timestamp_payload_mismatch",
+                    },
+                    status=status.HTTP_409_CONFLICT,
                 )
 
             last_cycle: PipelineCycle | None = (
@@ -385,23 +415,30 @@ class LiveIngestView(APIView):
                 record=processed,
             )
             try:
-                cycle_obj.save()
+                with transaction.atomic():
+                    cycle_obj.save()
             except IntegrityError:
-                # Rare race: duplicate (run, live, sample_ts) slipped through.
-                dup = (
-                    PipelineCycle.objects.filter(
-                        run=run,
-                        source_type=PipelineCycle.SourceType.LIVE,
-                        sample_ts=sample_ts,
-                    )
-                    .order_by("cycle_index")
-                    .first()
-                )
+                # Rare race: another worker inserted the same dedupe key first.
+                dup = PipelineCycle.objects.filter(
+                    run=run,
+                    ingest_dedupe_key=dedupe_key,
+                ).first()
                 if dup is None:
                     raise
+                if _live_sensor_payload_matches(data, dup):
+                    return Response(
+                        _response_from_pipeline_cycle(dup, idempotent=True),
+                        status=status.HTTP_200_OK,
+                    )
                 return Response(
-                    _response_from_pipeline_cycle(dup, idempotent=True),
-                    status=status.HTTP_200_OK,
+                    {
+                        "error": (
+                            "A sample with this timestamp was already ingested "
+                            "with different sensor values; refusing to overwrite."
+                        ),
+                        "code": "duplicate_timestamp_payload_mismatch",
+                    },
+                    status=status.HTTP_409_CONFLICT,
                 )
 
         logger.info(
