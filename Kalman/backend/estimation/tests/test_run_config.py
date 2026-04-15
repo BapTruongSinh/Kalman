@@ -429,9 +429,13 @@ class TestCreateRun(TestCase):
         assert run.dataset_source == "/data/custom.csv"
 
     def test_run_type_custom(self):
+        from django.contrib.auth import get_user_model
+
         from estimation.models import ExperimentRun
+
         cfg = _default_config()
-        run = create_run(cfg, run_type=ExperimentRun.RunType.LIVE)
+        user = get_user_model().objects.create_user(username="live_owner_svc", password="x")
+        run = create_run(cfg, run_type=ExperimentRun.RunType.LIVE, owner=user)
         assert run.run_type == "live"
 
     def test_notes_stored(self):

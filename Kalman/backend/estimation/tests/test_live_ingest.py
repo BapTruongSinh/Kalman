@@ -20,6 +20,8 @@ Coverage
 * preprocess_single unit tests (offline from Django, pure logic).
 * validate_live_record pure unit tests.
 * _restore_state pure unit tests.
+* Authorization: only ExperimentRun.owner's token may ingest (403 otherwise).
+* Idempotent retries: duplicate (run_id, timestamp) → 200 with idempotent flag.
 """
 
 from __future__ import annotations
@@ -74,12 +76,13 @@ def auth_client(token):
 
 
 @pytest.fixture
-def live_run(db):
-    """Active live ExperimentRun with default ExperimentConfig."""
+def live_run(db, device_user):
+    """Active live ExperimentRun with default ExperimentConfig and owner."""
     run = ExperimentRun.objects.create(
         name="live-test",
         run_type=ExperimentRun.RunType.LIVE,
         status=ExperimentRun.Status.RUNNING,
+        owner=device_user,
     )
     ExperimentConfig.objects.create(run=run)
     return run
@@ -88,6 +91,19 @@ def live_run(db):
 @pytest.fixture
 def payload(live_run):
     return {**_VALID_PAYLOAD, "run_id": live_run.pk}
+
+
+@pytest.fixture
+def other_user(db):
+    return User.objects.create_user(username="other_device", password="x")
+
+
+@pytest.fixture
+def other_auth_client(other_user):
+    tok, _ = Token.objects.get_or_create(user=other_user)
+    c = APIClient()
+    c.credentials(HTTP_AUTHORIZATION=f"Token {tok.key}")
+    return c
 
 
 # ── Authentication ─────────────────────────────────────────────────────────────
@@ -106,6 +122,54 @@ def test_invalid_token_returns_401(live_run):
     client.credentials(HTTP_AUTHORIZATION="Token not-a-real-token")
     resp = client.post(_INGEST_URL, {**_VALID_PAYLOAD, "run_id": live_run.pk}, format="json")
     assert resp.status_code == 401
+
+
+# ── Object-level authorization (ExperimentRun.owner) ───────────────────────────
+
+
+@pytest.mark.django_db
+def test_other_user_token_returns_403_no_cycle(other_auth_client, live_run, payload):
+    """Token for a different user must not ingest into another owner's live run."""
+    resp = other_auth_client.post(_INGEST_URL, payload, format="json")
+    assert resp.status_code == 403
+    assert PipelineCycle.objects.filter(run=live_run).count() == 0
+
+
+@pytest.mark.django_db
+def test_live_run_without_owner_returns_403(auth_client, db, device_user):
+    """Runs with owner=NULL cannot accept live samples until owner is assigned."""
+    run = ExperimentRun.objects.create(
+        name="unowned-live",
+        run_type=ExperimentRun.RunType.LIVE,
+        status=ExperimentRun.Status.RUNNING,
+        owner=None,
+    )
+    ExperimentConfig.objects.create(run=run)
+    resp = auth_client.post(
+        _INGEST_URL,
+        {**_VALID_PAYLOAD, "run_id": run.pk},
+        format="json",
+    )
+    assert resp.status_code == 403
+    assert PipelineCycle.objects.filter(run=run).count() == 0
+
+
+# ── Idempotent retry (same run_id + timestamp) ─────────────────────────────────
+
+
+@pytest.mark.django_db
+def test_duplicate_timestamp_returns_200_idempotent(auth_client, payload, live_run):
+    """Transport retry with identical payload must not double-apply the Kalman step."""
+    r1 = auth_client.post(_INGEST_URL, payload, format="json")
+    assert r1.status_code == 201
+    body1 = r1.json()
+    r2 = auth_client.post(_INGEST_URL, payload, format="json")
+    assert r2.status_code == 200
+    body2 = r2.json()
+    assert body2.get("idempotent") is True
+    assert body2["cycle_index"] == body1["cycle_index"]
+    assert body2["kf_x_posterior"] == body1["kf_x_posterior"]
+    assert PipelineCycle.objects.filter(run=live_run).count() == 1
 
 
 # ── Happy path ─────────────────────────────────────────────────────────────────
@@ -181,11 +245,12 @@ def test_offline_run_returns_404(auth_client, db):
 
 
 @pytest.mark.django_db
-def test_pending_live_run_returns_409(auth_client, db):
+def test_pending_live_run_returns_409(auth_client, db, device_user):
     run = ExperimentRun.objects.create(
         name="pending-live",
         run_type=ExperimentRun.RunType.LIVE,
         status=ExperimentRun.Status.PENDING,
+        owner=device_user,
     )
     resp = auth_client.post(
         _INGEST_URL,
@@ -196,11 +261,12 @@ def test_pending_live_run_returns_409(auth_client, db):
 
 
 @pytest.mark.django_db
-def test_completed_live_run_returns_409(auth_client, db):
+def test_completed_live_run_returns_409(auth_client, db, device_user):
     run = ExperimentRun.objects.create(
         name="completed-live",
         run_type=ExperimentRun.RunType.LIVE,
         status=ExperimentRun.Status.COMPLETED,
+        owner=device_user,
     )
     resp = auth_client.post(
         _INGEST_URL,
@@ -211,7 +277,7 @@ def test_completed_live_run_returns_409(auth_client, db):
 
 
 @pytest.mark.django_db
-def test_status_guard_inside_lock_prevents_cycle_creation(auth_client, db):
+def test_status_guard_inside_lock_prevents_cycle_creation(auth_client, db, device_user):
     """TOCTOU regression: status check executed inside the locked transaction.
 
     Simulates the race window where a run transitions to a terminal state
@@ -225,6 +291,7 @@ def test_status_guard_inside_lock_prevents_cycle_creation(auth_client, db):
         name="toctou-completed",
         run_type=ExperimentRun.RunType.LIVE,
         status=ExperimentRun.Status.COMPLETED,
+        owner=device_user,
     )
     resp = auth_client.post(
         _INGEST_URL,
@@ -350,12 +417,13 @@ def test_reconnect_after_error_cycle_resets_state(auth_client, payload, live_run
 
 
 @pytest.mark.django_db
-def test_missing_experiment_config_uses_defaults(auth_client, db):
+def test_missing_experiment_config_uses_defaults(auth_client, db, device_user):
     """Run without a config snapshot falls back to ADR-003 defaults."""
     run = ExperimentRun.objects.create(
         name="no-config-live",
         run_type=ExperimentRun.RunType.LIVE,
         status=ExperimentRun.Status.RUNNING,
+        owner=device_user,
     )
     # Intentionally do NOT create ExperimentConfig
     payload = {**_VALID_PAYLOAD, "run_id": run.pk}

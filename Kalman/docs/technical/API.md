@@ -44,7 +44,7 @@ python manage.py drf_create_token <username>
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
-| `run_id` | int | Yes | ID of a `live` ExperimentRun in `running` status |
+| `run_id` | int | Yes | ID of a `live` ExperimentRun in `running` status with a non-null `owner` matching the authenticated user |
 | `timestamp` | ISO-8601 UTC | Yes | Timestamp from the sensor |
 | `soil_moisture` | float \| null | No | Primary Kalman channel (%) |
 | `temperature` | float \| null | No | Stored for traceability |
@@ -67,6 +67,22 @@ python manage.py drf_create_token <username>
 }
 ```
 
+**Response `200 OK` (idempotent retry)**
+
+The same `run_id` and `timestamp` may only produce one live `PipelineCycle`. A duplicate POST (e.g. client retry after timeout) returns `200` with the same body as the original cycle plus `"idempotent": true`. The Kalman step is **not** applied again.
+
+```json
+{
+  "cycle_index": 0,
+  "preprocess_status": "valid",
+  "cycle_status": "ok",
+  "adaptive_status": "R_updated",
+  "kf_x_posterior": 45.1,
+  "kf_innovation": 0.2,
+  "idempotent": true
+}
+```
+
 | Field | Type | Notes |
 |-------|------|-------|
 | `cycle_index` | int | Zero-based monotonic index within the run |
@@ -75,6 +91,7 @@ python manage.py drf_create_token <username>
 | `adaptive_status` | string | `R_updated` / `R_skipped` / `skipped` |
 | `kf_x_posterior` | float \| null | Filtered soil-moisture estimate |
 | `kf_innovation` | float \| null | Measurement residual; null when no update |
+| `idempotent` | bool | Present only on `200` duplicate-timestamp responses |
 
 **Error responses**
 
@@ -82,8 +99,11 @@ python manage.py drf_create_token <username>
 |--------|---------|
 | `400 Bad Request` | Payload validation failed (missing/invalid fields) |
 | `401 Unauthorized` | Missing or invalid auth token |
+| `403 Forbidden` | Authenticated user is not the run `owner`, or the run has no `owner` set |
 | `404 Not Found` | `run_id` not found, or run is not of `live` type |
 | `409 Conflict` | Run is not in `running` status (pending / completed / failed) |
+
+**Authorization**: Assign `ExperimentRun.owner` to the device user (same account as the DRF token). Only that user may POST samples for the run.
 
 **Reconnect / gap handling**: If the most recent persisted cycle has null Kalman fields (error recovery), the state resets from the `ExperimentConfig` defaults so the pipeline resumes cleanly.
 

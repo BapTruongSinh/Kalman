@@ -44,7 +44,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from rest_framework import status
 from rest_framework.authentication import TokenAuthentication
 from rest_framework.permissions import IsAuthenticated
@@ -149,14 +149,58 @@ def _restore_state(
     )
 
 
+def _normalize_sample_ts(ts: datetime) -> datetime:
+    """Return *ts* as timezone-aware UTC (naïve values are treated as UTC)."""
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=timezone.utc)
+    return ts
+
+
+def _live_ingest_response_body(
+    *,
+    cycle_index: int,
+    preprocess_status: str,
+    cycle_status: str,
+    adaptive_status: str,
+    kf_x_posterior: float | None,
+    kf_innovation: float | None,
+    idempotent: bool = False,
+) -> dict:
+    """JSON body for successful live ingest (201 or idempotent 200)."""
+    body: dict = {
+        "cycle_index": cycle_index,
+        "preprocess_status": preprocess_status,
+        "cycle_status": cycle_status,
+        "adaptive_status": adaptive_status,
+        "kf_x_posterior": kf_x_posterior,
+        "kf_innovation": kf_innovation,
+    }
+    if idempotent:
+        body["idempotent"] = True
+    return body
+
+
+def _response_from_pipeline_cycle(
+    cycle: PipelineCycle, *, idempotent: bool = False
+) -> dict:
+    """Build the public JSON body from a persisted :class:`~..models.PipelineCycle`."""
+    return _live_ingest_response_body(
+        cycle_index=cycle.cycle_index,
+        preprocess_status=cycle.preprocess_status,
+        cycle_status=cycle.cycle_status,
+        adaptive_status=cycle.adaptive_status,
+        kf_x_posterior=cycle.kf_x_posterior,
+        kf_innovation=cycle.kf_innovation,
+        idempotent=idempotent,
+    )
+
+
 def _build_raw_record(data: dict, row_index: int) -> RawRecord:
     """Convert validated serializer data to a :class:`~..ingestion.loader.RawRecord`.
 
     The timestamp is made UTC-aware when it arrives as naïve.
     """
-    ts: datetime = data["timestamp"]
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
+    ts = _normalize_sample_ts(data["timestamp"])
     return RawRecord(
         timestamp=ts,
         soil_moisture=data.get("soil_moisture"),
@@ -200,8 +244,12 @@ class LiveIngestView(APIView):
     **Responses**:
 
     * ``201 Created`` — sample accepted; body contains filtered estimate.
+    * ``200 OK`` — same ``run_id`` + ``timestamp`` was already ingested; body is
+      the existing cycle (``"idempotent": true``). Safe for transport retries.
     * ``400 Bad Request`` — invalid payload (missing required fields, wrong types).
     * ``401 Unauthorized`` — missing or invalid token.
+    * ``403 Forbidden`` — authenticated user is not the run ``owner``, or the
+      live run has no ``owner`` assigned (ingestion disabled until one is set).
     * ``404 Not Found`` — ``run_id`` does not exist or is not a live run.
     * ``409 Conflict`` — run exists but is not in ``"running"`` status.
     """
@@ -250,6 +298,28 @@ class LiveIngestView(APIView):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
+            # Object-level authorization: only the assigned owner may ingest.
+            if run.owner_id is None:
+                return Response(
+                    {
+                        "error": (
+                            "This live run has no owner assigned; ingestion is "
+                            "disabled until owner is set on the ExperimentRun."
+                        )
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            if run.owner_id != request.user.pk:
+                return Response(
+                    {
+                        "error": (
+                            "You do not have permission to ingest samples for "
+                            "this run."
+                        )
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
             # Authoritative status guard — evaluated with the row lock held.
             if run.status != ExperimentRun.Status.RUNNING:
                 return Response(
@@ -271,6 +341,22 @@ class LiveIngestView(APIView):
                     run_id,
                 )
                 kalman_config = KalmanConfig()
+
+            sample_ts = _normalize_sample_ts(data["timestamp"])
+            existing_live = (
+                PipelineCycle.objects.filter(
+                    run=run,
+                    source_type=PipelineCycle.SourceType.LIVE,
+                    sample_ts=sample_ts,
+                )
+                .order_by("cycle_index")
+                .first()
+            )
+            if existing_live is not None:
+                return Response(
+                    _response_from_pipeline_cycle(existing_live, idempotent=True),
+                    status=status.HTTP_200_OK,
+                )
 
             last_cycle: PipelineCycle | None = (
                 PipelineCycle.objects.filter(run=run).order_by("-cycle_index").first()
@@ -298,7 +384,25 @@ class LiveIngestView(APIView):
                 source_type=PipelineCycle.SourceType.LIVE,
                 record=processed,
             )
-            cycle_obj.save()
+            try:
+                cycle_obj.save()
+            except IntegrityError:
+                # Rare race: duplicate (run, live, sample_ts) slipped through.
+                dup = (
+                    PipelineCycle.objects.filter(
+                        run=run,
+                        source_type=PipelineCycle.SourceType.LIVE,
+                        sample_ts=sample_ts,
+                    )
+                    .order_by("cycle_index")
+                    .first()
+                )
+                if dup is None:
+                    raise
+                return Response(
+                    _response_from_pipeline_cycle(dup, idempotent=True),
+                    status=status.HTTP_200_OK,
+                )
 
         logger.info(
             "Live run %d: cycle %d persisted (status=%s, adaptive=%s).",
@@ -309,13 +413,13 @@ class LiveIngestView(APIView):
         )
 
         return Response(
-            {
-                "cycle_index": cycle_index,
-                "preprocess_status": processed.preprocess_status,
-                "cycle_status": cycle_result.cycle_status,
-                "adaptive_status": cycle_result.adaptive_status,
-                "kf_x_posterior": cycle_result.x_posterior,
-                "kf_innovation": cycle_result.innovation,
-            },
+            _live_ingest_response_body(
+                cycle_index=cycle_index,
+                preprocess_status=processed.preprocess_status,
+                cycle_status=cycle_result.cycle_status,
+                adaptive_status=cycle_result.adaptive_status,
+                kf_x_posterior=cycle_result.x_posterior,
+                kf_innovation=cycle_result.innovation,
+            ),
             status=status.HTTP_201_CREATED,
         )

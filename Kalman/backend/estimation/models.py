@@ -5,6 +5,7 @@ Schema designed in task #002 — see docs/technical/DATABASE.md for full referen
 All tables use utf8mb4 charset (configured in Django DATABASES settings).
 """
 
+from django.conf import settings
 from django.db import models
 
 
@@ -46,12 +47,21 @@ class ExperimentRun(models.Model):
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(null=True, blank=True)
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="experiment_runs",
+        help_text="User allowed to POST live samples for this run (live ingestion only)",
+    )
 
     class Meta:
         db_table = "experiment_runs"
         indexes = [
             models.Index(fields=["status"], name="idx_runs_status"),
             models.Index(fields=["created_at"], name="idx_runs_created"),
+            models.Index(fields=["owner"], name="idx_runs_owner"),
         ]
 
     def __str__(self) -> str:
@@ -281,6 +291,13 @@ class PipelineCycle(models.Model):
             models.UniqueConstraint(
                 fields=["run", "cycle_index"],
                 name="uq_cycles_run_index",
+            ),
+            # Live only: one row per (run, sample_ts). CSV/MySQL replay may repeat
+            # timestamps within a run; live ingestion uses this for idempotent retries.
+            models.UniqueConstraint(
+                fields=["run", "sample_ts"],
+                condition=models.Q(source_type="live"),
+                name="uq_cycles_run_live_sample_ts",
             ),
             models.CheckConstraint(
                 check=models.Q(slice_type__in=["train", "validation", "test"]),

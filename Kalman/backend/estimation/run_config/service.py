@@ -38,6 +38,7 @@ def create_run(
     *,
     run_type: str = ExperimentRun.RunType.OFFLINE_REPLAY,
     notes: str | None = None,
+    owner=None,
 ) -> ExperimentRun:
     """Atomically create an ``ExperimentRun`` + its ``ExperimentConfig`` snapshot.
 
@@ -53,6 +54,9 @@ def create_run(
         ``ExperimentRun.RunType`` choice string; defaults to ``"offline_replay"``.
     notes:
         Optional free-text annotation stored on the run row.
+    owner:
+        User who may POST live samples for this run (``ExperimentRun.owner``).
+        Ignored for offline replays unless callers choose to set it.
 
     Returns
     -------
@@ -66,6 +70,7 @@ def create_run(
             status=ExperimentRun.Status.PENDING,
             dataset_source=config.dataset_source or None,
             notes=notes,
+            owner=owner,
         )
         ExperimentConfig.objects.create(
             run=run,
