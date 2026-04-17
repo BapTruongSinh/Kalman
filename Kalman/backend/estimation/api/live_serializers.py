@@ -1,8 +1,8 @@
 """
-Serializer cho endpoint nạp dữ liệu sensor live (Task #010).
+Serializer cho endpoint nạp dữ liệu sensor live
 
 LiveSampleSerializer  — validate một sample thiết bị POST lên
-    ``POST /api/ingest/samples/``.
+    "POST /api/ingest/samples/".
 
 LiveIngestResponseSerializer — mô tả shape response 201.
     (Dùng cho tài liệu / test assertion; view tự build response dict để tránh
@@ -28,7 +28,7 @@ _SENSOR_CHANNELS = (
 
 
 def _validate_finite_or_null(value: float | None, field_name: str) -> float | None:
-    """Trả lại *value* nếu hợp lệ, hoặc raise ValidationError nếu là NaN / Inf."""
+    """Trả lại value nếu hợp lệ, hoặc ném ValidationError nếu là NaN / Inf."""
     if value is None:
         return None
     if not math.isfinite(value):
@@ -40,24 +40,6 @@ def _validate_finite_or_null(value: float | None, field_name: str) -> float | No
 
 class LiveSampleSerializer(serializers.Serializer):
     """Validate một sample sensor live từ thiết bị.
-
-    Field bắt buộc
-    --------------
-    run_id:
-        Primary key của live :class:`~estimation.models.ExperimentRun` có
-        ``status`` là ``"running"``.
-    timestamp:
-        Timestamp ISO-8601 từ thiết bị. Nên dùng UTC; timestamp naïve được xem
-        là UTC.
-
-    Kênh sensor tùy chọn
-    --------------------
-    Mọi kênh sensor đều nhận ``null``. Bộ lọc Kalman sẽ bỏ qua bước cập nhật đo
-    lường khi ``soil_moisture`` vắng mặt hoặc không hợp lệ.
-
-    Giá trị không hữu hạn (NaN, Infinity, -Infinity) bị từ chối với 400 Bad
-    Request. MySQL không lưu được các giá trị này; nếu cho lọt qua sẽ gây 500
-    khi save.
     """
 
     run_id = serializers.IntegerField(
@@ -82,7 +64,7 @@ class LiveSampleSerializer(serializers.Serializer):
     mist = serializers.FloatField(allow_null=True, required=False, default=None)
     fan = serializers.FloatField(allow_null=True, required=False, default=None)
 
-    # ── Chặn giá trị không hữu hạn theo từng field ──────────────────────────
+    # ── Chặn giá trị không hữu hạn theo từng field
 
     def validate_soil_moisture(self, value: float | None) -> float | None:
         return _validate_finite_or_null(value, "soil_moisture")
@@ -107,7 +89,7 @@ class LiveSampleSerializer(serializers.Serializer):
 
 
 class LiveIngestResponseSerializer(serializers.Serializer):
-    """Shape của response 201 Created từ ``POST /api/ingest/samples/``.
+    """Shape của response 201 Created từ "POST /api/ingest/samples/".
 
     Dùng trong test và tài liệu; view tự tạo dict trực tiếp.
     """

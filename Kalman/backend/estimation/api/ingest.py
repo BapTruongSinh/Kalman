@@ -1,30 +1,30 @@
 """
-Endpoint nạp dữ liệu sensor live (Task #010).
+Endpoint nạp dữ liệu sensor live
 
 Endpoint
 --------
-``POST /api/ingest/samples/``
+"POST /api/ingest/samples/"
 
 Nhận một sample sensor, chạy qua cùng pipeline validate/tiền xử lý như replay
-CSV offline, chạy một bước Kalman, lưu dòng ``PipelineCycle`` và trả về giá trị
+CSV offline, chạy một bước Kalman, lưu dòng "PipelineCycle" và trả về giá trị
 ước lượng sau lọc.
 
 Ghi chú thiết kế
 ----------------
 Xác thực
-    Dùng DRF ``TokenAuthentication``. Endpoint này luôn cần token.
-    Các API ``GET`` chỉ đọc cho dashboard đi theo ``DASHBOARD_REQUIRE_AUTH`` /
-    ``DEFAULT_PERMISSION_CLASSES`` trong Django settings; production mặc định
+    Dùng DRF "TokenAuthentication". Endpoint này luôn cần token.
+    Các API "GET" chỉ đọc cho dashboard đi theo "DASHBOARD_REQUIRE_AUTH" /
+    "DEFAULT_PERMISSION_CLASSES" trong Django settings; production mặc định
     yêu cầu user đã xác thực, trừ khi mở rõ ràng.
 
     Provision a token::
 
         python manage.py drf_create_token <username>
 
-    Then include the header ``Authorization: Token <key>`` in every POST.
+    Then include the header "Authorization: Token <key>" in every POST.
 
 An toàn khi reconnect
-    Trạng thái Kalman (x_post, P_post, R) được load từ ``PipelineCycle`` *đã lưu
+    Trạng thái Kalman (x_post, P_post, R) được load từ "PipelineCycle" *đã lưu
     gần nhất* ở mỗi request. Thiết bị có thể mất kết nối rồi reconnect; bộ lọc
     sẽ chạy tiếp từ điểm đã dừng.
 
@@ -35,7 +35,7 @@ Xử lý khoảng trống thời gian
 
 Dự đoán ARX
     Đường live ở v1 cố ý chưa dùng ARX. Train ARX cần batch dữ liệu offline;
-    adapter để ``None`` nên prior Kalman fallback về posterior trước đó. Sau này
+    adapter để "None" nên prior Kalman fallback về posterior trước đó. Sau này
     có thể nối artifact ARX đã train khi có dataset từ thiết bị live.
 """
 
@@ -95,26 +95,7 @@ def _restore_state(
     last_cycle: PipelineCycle | None,
     config: KalmanConfig,
 ) -> tuple[KalmanState, int]:
-    """Dựng lại state của bộ lọc và ``cycle_index`` kế tiếp từ DB.
-
-    Parameters
-    ----------
-    last_cycle:
-        :class:`~..models.PipelineCycle` mới nhất của run, hoặc ``None`` nếu
-        chưa lưu cycle nào.
-    config:
-        :class:`~..kalman.cycle.KalmanConfig` đang dùng cho run.
-
-    Returns
-    -------
-    (state, cycle_index)
-        *state* sẽ được inject vào estimator trước khi gọi ``step()``.
-        *cycle_index* là index bắt đầu từ 0 cho bước mới này.
-
-    Ghi chú
-    -------
-    Nếu cycle cuối có ``None`` ở bất kỳ field Kalman nào, ví dụ sau cycle lỗi,
-    state được reset từ *config*. Như vậy reconnect vẫn sạch kể cả sau bước lỗi.
+    """Dựng lại state của bộ lọc và "cycle_index" kế tiếp từ DB.
     """
     if last_cycle is None:
         return KalmanState.from_config(config), 0
@@ -203,7 +184,7 @@ def _nullable_float_equal(a: float | None, b: float | None) -> bool:
 
 
 def _live_sensor_payload_matches(data: dict, cycle: PipelineCycle) -> bool:
-    """True nếu request *data* đã validate khớp các cột ``raw_*`` trên *cycle*."""
+    """True nếu request *data* đã validate khớp các cột "raw_*" trên *cycle*."""
     for field in _SENSOR_FIELDS:
         if not _nullable_float_equal(data.get(field), getattr(cycle, f"raw_{field}")):
             return False
@@ -235,7 +216,7 @@ def _build_raw_record(data: dict, row_index: int) -> RawRecord:
 class LiveIngestView(APIView):
     """Nhận một sample sensor live và chạy một bước Kalman.
 
-    **Xác thực**: bắt buộc có header ``Authorization: Token <key>``.
+    **Xác thực**: bắt buộc có header "Authorization: Token <key>".
 
     **Request body** (JSON):
 
@@ -253,20 +234,20 @@ class LiveIngestView(APIView):
             "fan": 1.0
         }
 
-    Tất cả kênh sensor trừ ``timestamp`` và ``run_id`` đều tùy chọn và nhận
-    ``null``.
+    Tất cả kênh sensor trừ "timestamp" và "run_id" đều tùy chọn và nhận
+    "null".
 
     **Response**:
 
-    * ``201 Created``: sample được nhận; body chứa estimate sau lọc.
-    * ``200 OK``: cùng ``run_id`` + ``timestamp`` và payload sensor giống hệt đã
-      ingest trước đó; body là cycle đã có (``"idempotent": true``), an toàn cho retry.
-    * ``400 Bad Request``: payload sai, thiếu field bắt buộc hoặc sai kiểu.
-    * ``401 Unauthorized``: thiếu token hoặc token không hợp lệ.
-    * ``403 Forbidden``: user xác thực không phải ``owner`` của run, hoặc live
-      run chưa gán ``owner`` nên tạm khóa ingest.
-    * ``404 Not Found``: ``run_id`` không tồn tại hoặc không phải live run.
-    * ``409 Conflict``: run không ở ``"running"``, hoặc cùng ``timestamp`` đã
+    * "201 Created": sample được nhận; body chứa estimate sau lọc.
+    * "200 OK": cùng "run_id" + "timestamp" và payload sensor giống hệt đã
+      ingest trước đó; body là cycle đã có (""idempotent": true"), an toàn cho retry.
+    * "400 Bad Request": payload sai, thiếu field bắt buộc hoặc sai kiểu.
+    * "401 Unauthorized": thiếu token hoặc token không hợp lệ.
+    * "403 Forbidden": user xác thực không phải "owner" của run, hoặc live
+      run chưa gán "owner" nên tạm khóa ingest.
+    * "404 Not Found": "run_id" không tồn tại hoặc không phải live run.
+    * "409 Conflict": run không ở ""running"", hoặc cùng "timestamp" đã
       ingest với payload sensor **khác** nên không được ghi đè.
     """
 
@@ -283,7 +264,7 @@ class LiveIngestView(APIView):
         run_id: int = data["run_id"]
 
         # ── Pre-check nhanh: loại run_id sai rõ ràng trước khi lock ──────────
-        # Đây chỉ là guard lạc quan; check có thẩm quyền về type và status nằm
+        # Đây chỉ là guard; check có thẩm quyền về type và status nằm
         # trong atomic block, nơi row đã được lock.
         if not ExperimentRun.objects.filter(
             pk=run_id, run_type=ExperimentRun.RunType.LIVE

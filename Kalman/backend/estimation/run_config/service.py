@@ -57,43 +57,14 @@ def create_run(
 
 
 def load_config(run_id: int) -> RunConfig:
-    """Load và trả về ``RunConfig`` cho run id được truyền vào.
-
-    Raises
-    ------
-    ExperimentRun.DoesNotExist
-        Nếu không có run với ``pk=run_id``.
-    ExperimentConfig.DoesNotExist
-        Nếu run tồn tại nhưng chưa có dòng config tương ứng.
+    """Load và trả về "RunConfig" cho run id được truyền vào.
     """
     db_cfg = ExperimentConfig.objects.select_related("run").get(run_id=run_id)
     return RunConfig.from_experiment_config(db_cfg)
 
 
 def update_config(run_id: int, config: RunConfig) -> ExperimentConfig:
-    """Thay cấu hình của một run còn *pending*.
-
-    Dòng ``ExperimentConfig`` được ghi đè và ``raw_config_json`` được refresh.
-    Chỉ run có ``status="pending"`` mới được cập nhật.
-
-    Parameters
-    ----------
-    run_id:
-        Primary key của ``ExperimentRun`` cần cập nhật.
-    config:
-        ``RunConfig`` mới cần lưu.
-
-    Returns
-    -------
-    ExperimentConfig
-        Dòng config đã cập nhật.
-
-    Raises
-    ------
-    ConfigFrozenError
-        Nếu trạng thái run không phải ``"pending"``.
-    ExperimentRun.DoesNotExist
-        Nếu không có run với ``pk=run_id``.
+    """Thay cấu hình của một run còn pending.
     """
     with transaction.atomic():
         run = ExperimentRun.objects.select_for_update().get(pk=run_id)

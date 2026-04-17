@@ -4,12 +4,6 @@ Chu kỳ ước lượng Adaptive Kalman cho biến vô hướng Soil_Moisture.
 Thuật toán dùng R thích nghi theo innovation và có giới hạn trên/dưới
 (Q được giữ cố định trong từng lần chạy).
 
-Bước dự đoán (time update)
---------------------------
-    x_prior  = y_hat_k   if ARX prediction is available and status == "ok"
-               else x_post_prev   (last posterior, carry-forward)
-    P_prior  = P_post_prev + Q
-
 Bước cập nhật đo lường (khi có z_k và preprocess_status != "skipped")
 ----------------------------------------------------------------------
     e_k      = z_k - x_prior
@@ -247,7 +241,7 @@ class AdaptiveKalmanCycle:
     # ── Truy cập public dạng chỉ đọc 
     @property
     def state(self) -> KalmanState:
-        """Trạng thái hiện tại của bộ lọc, trả về reference chỉ đọc theo quy ước."""
+        """Trạng thái hiện tại của bộ lọc, trả về reference chỉ đọc theo quy ước"""
         return self._state
 
     @property
@@ -257,7 +251,7 @@ class AdaptiveKalmanCycle:
 
     @property
     def history(self) -> list[ProcessedRecord]:
-        """Tất cả record đã xử lý theo thứ tự thời gian, trả về bản sao."""
+        """Tất cả record đã xử lý theo thứ tự thời gian, trả về bản sao"""
         return list(self._history)
 
     # ── Một bước xử lý ────────────────────────────────────────────────────────
@@ -304,7 +298,6 @@ class AdaptiveKalmanCycle:
             )
 
         # Luôn tăng history và step counter bất kể kết quả.
-        # Bọc append để input không đúng kiểu cũng không làm raise tiếp.
         if record is not None:
             try:
                 self._history.append(record)
@@ -339,13 +332,13 @@ class AdaptiveKalmanCycle:
             for i, rec in enumerate(records)
         ]
 
-    # ── Triển khai nội bộ ─────────────────────────────────────────────────────
+    # ── Triển khai
 
     def _step_impl(self, record: ProcessedRecord, *, cycle_index: int, t0: float, ) -> CycleResult:
         cfg = self._config
         state = self._state
 
-        # ── 1. Hỏi prediction adapter để dự báo bước kế tiếp ─────────────────
+        # ── 1. prediction adapter
         arx_result: PredictionResult | None = None
         if self._adapter is not None:
             min_hist = getattr(self._adapter, "min_history_len", 0)
@@ -370,7 +363,7 @@ class AdaptiveKalmanCycle:
         )
         P_prior: float = state.P_post + cfg.Q
 
-        # ── 3. Kiểm tra có đo lường hay không
+        # ── 3. Kiểm tra có giá trị đo lường hay không
         z: float | None = record.soil_moisture
         preprocess_status: str = record.preprocess_status
         measurement_ok: bool = (
@@ -402,13 +395,12 @@ class AdaptiveKalmanCycle:
                 latency_ms=elapsed,
             )
 
-        # ── 4. Cập nhật đo lường ─────────────────────────────────────────────
-        assert z is not None  # đã xác nhận ở trên
+        # ── 4. Cập nhật giá trị
+        assert z is not None
 
         # Innovation, tức sai lệch giữa đo lường và prior.
         e: float = z - x_prior
-
-        # R thích nghi: EMA có chặn biên của bình phương innovation.
+        
         # R tăng khi innovation lớn, giảm khi innovation nhỏ.
         R_raw: float = cfg.alpha * state.R + (1.0 - cfg.alpha) * e * e
         R_new: float = float(max(cfg.R_min, min(cfg.R_max, R_raw)))
