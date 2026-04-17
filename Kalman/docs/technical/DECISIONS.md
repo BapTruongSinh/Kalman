@@ -20,6 +20,7 @@ Read by: All agents. Check this file before proposing changes that may conflict 
 |----|-------|--------|------|
 | ADR-001 | Use Vite, Python/Django, MySQL, ARX, and Kalman for v1 state estimation | Accepted | 2026-04-13 |
 | ADR-002 | Orient estimation and control contracts toward Adaptive Kalman plus AMPC | Accepted | 2026-04-14 |
+| ADR-003 | Lock v1 estimation scope around scalar soil moisture, adaptive R, offline replay, and AMPC-ready docs only | Accepted | 2026-04-14 |
 
 ---
 
@@ -81,6 +82,47 @@ Use option 3. v1 remains staged around dataset ingestion, preprocessing, predict
 - **Positive**: Explicit offline ARX retraining lets the project demonstrate a reproducible prediction baseline while keeping online retraining/model registry out of v1.
 - **Negative**: Task #001 becomes more important because it must choose a bounded adaptive-estimation rule and decide whether v1 includes an offline AMPC optimizer prototype.
 - **Neutral**: Full autonomous actuation remains gated until requirements explicitly promote it.
+
+---
+
+## ADR-003: Lock v1 estimation scope around scalar soil moisture, adaptive R, offline replay, and AMPC-ready docs only
+
+**Date**: 2026-04-14
+**Status**: Accepted
+**Deciders**: Project owner / Codex
+
+### Context
+
+ADR-002 intentionally left several v1 implementation details open so task `#001` could resolve them with owner input. The owner has now answered the estimator-target, data-flow, adaptive-rule, initialization, storage, and AMPC-boundary questions. Those answers are concrete enough that downstream tasks `#002` through `#005` and `#013` should no longer stay blocked on ambiguity.
+
+The main remaining risk is accidental re-expansion of scope. Without a precise ADR, implementation could drift toward multi-state estimation, adaptive `Q` plus `R`, live-first ingestion, or an early AMPC optimizer prototype before the estimation path is validated.
+
+### Options Considered
+
+1. **Keep decisions only in task notes and PRD text**: Lightweight, but downstream implementation can still reinterpret the architecture and re-open already settled choices.
+2. **Lock the resolved v1 boundary in a dedicated ADR**: Adds one more decision record, but gives downstream tasks a stable architectural contract.
+3. **Promote scope directly to multi-state estimation plus offline AMPC prototype**: More ambitious, but increases implementation and debugging risk before the replay estimator is stable.
+
+### Decision
+
+Use option 2. For v1:
+
+- The first estimator state is scalar `Soil_Moisture`.
+- ARX remains the explicit offline retrainable baseline prediction block.
+- Data flows from a time-series table/query result with chronological split (`train 60% / validation 20% / test 20%`); CSV is treated as a snapshot/export of that table, not the permanent hard-coded storage model.
+- The minimal adaptive mechanism is bounded innovation-driven adaptive `R`; `Q` remains fixed during a run and is tuned on validation.
+- Default initialization is `x0 = first observed Soil_Moisture`, `P0 = 1.0`, `Q = 0.05` unless validation selects another value, `R0 = 1.0`, `R_min = 0.05`, `R_max = 25.0`, `alpha = 0.95`.
+- v1 is offline-first for replay and evaluation. Live ingestion is a later extension, not the primary delivery path.
+- MySQL from XAMPP is the local source of truth for persistent storage; CSV remains a replay/export format.
+- v1 includes AMPC-ready state/control/disturbance/cost/safety contracts only. It explicitly excludes an AMPC optimizer prototype and closed-loop actuation.
+- The held-out test acceptance gate is: full replay completes without crash, each output row logs timestamp/raw/predicted/filtered/innovation/`P`/`R`/status, innovation and covariance remain bounded without sustained explosion or long saturation, first-difference variance reduction passes at `>= 20%` with `>= 30%` as target, and filtered RMSE/MAE do not degrade more than 5% versus ARX prediction.
+
+### Consequences
+
+- **Positive**: Downstream implementation can proceed without reopening the estimator shape or AMPC boundary.
+- **Positive**: v1 now has a clear academic narrative: retrainable ARX baseline -> adaptive scalar estimator -> held-out evaluation -> AMPC-ready contracts.
+- **Negative**: Multi-state estimation and adaptive `Q` remain postponed even if future experiments might benefit from them.
+- **Neutral**: AWS hosting selection still remains deferred because it does not affect the local estimation path.
 
 ---
 

@@ -1,7 +1,7 @@
 # Adaptive Kalman + AMPC - Claude Instructions
 
 > Stack: Vite + Python/Django + MySQL from XAMPP + Django ORM + AWS target
-> Last updated: 2026-04-14
+> Last updated: 2026-04-15
 
 ## Project Context
 
@@ -93,5 +93,7 @@ TODO.md
 - `docs/technical/ADAPTIVE_KALMAN_AMPC_NOTES.md`
 - `docs/technical/API.md`
 - `docs/technical/DATABASE.md`
+- `docs/technical/METHODOLOGY_V1.md`
+- `docs/technical/AMPC_MODELING_HANDOFF.md`
 - `docs/user/USER_GUIDE.md`
 - `docs/content/CONTENT_STRATEGY.md`
