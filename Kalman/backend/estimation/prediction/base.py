@@ -1,21 +1,3 @@
-"""
-Hợp đồng prediction adapter cho pipeline ước lượng Adaptive Kalman.
-
-Bất kỳ model nào sinh dự đoán ``Soil_Moisture`` bước kế tiếp đều phải implement
-``PredictionAdapter``. Baseline ARX nằm trong ``arx_adapter.py``; các adapter
-LightGBM / XGBoost sau này cũng đi qua cùng boundary này để bộ Kalman
-(task #005) không phụ thuộc vào chi tiết nội bộ của model.
-
-Ràng buộc thiết kế
-------------------
-- ``predict()`` không được raise: dùng ``status="error"`` hoặc
-  ``"unavailable"`` để chu kỳ Kalman vẫn chạy tiếp khi không có dự đoán.
-- Các giá trị số trong ``PredictionInput.history`` được kỳ vọng là khác
-  ``None``; preprocessor ở task #003 chịu trách nhiệm điền trước đó.
-- ``model_kind`` là định danh ngắn, chữ thường như ``"arx"``, ``"lightgbm"``,
-  được lưu cùng từng dòng log chu kỳ để truy vết.
-"""
-
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -28,17 +10,6 @@ from ..ingestion import ProcessedRecord
 
 @dataclass
 class PredictionInput:
-    """Cửa sổ record đã tiền xử lý, dùng để dự đoán trước 1 bước.
-
-    Các record phải theo thứ tự thời gian, cũ nhất trước. Các field thực tế
-    nên khác ``None``; preprocessor phải xử lý thay thế trước khi gọi
-    ``predict()``.
-
-    Attributes
-    ----------
-    history:
-        Cần ít nhất ``adapter.min_history_len`` record.
-    """
 
     history: list[ProcessedRecord] = field(default_factory=list)
 

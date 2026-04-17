@@ -2,9 +2,7 @@
 ARX prediction adapter, bọc ``arx_pipeline.py`` phía sau ``PredictionAdapter``.
 
 Module này cung cấp ``ARXPredictionAdapter``, model dự đoán baseline của v1.
-Nó tái hiện logic train OLS và dự đoán trước 1 bước từ ``arx_pipeline.py``,
-nhưng chỉ dùng NumPy và object ``ProcessedRecord`` để không import code kiểu
-notebook khi chạy backend.
+Nó tái hiện logic train OLS và dự đoán trước 1 bước từ arx_pipeline.py
 
 ``load_artifact()`` hỗ trợ hai format artifact:
 

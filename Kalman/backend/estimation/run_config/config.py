@@ -53,37 +53,6 @@ _VALID_PREPROCESS_POLICIES = frozenset({"keep_last", "interpolate", "skip"})
 
 @dataclass(frozen=True)
 class RunConfig:
-    """Snapshot cấu hình dạng frozen cho một lần chạy ước lượng.
-
-    Tất cả giá trị mặc định khớp với quyết định đã chốt ở ADR-003 (Task #001).
-
-    Dataclass này frozen để object ``RunConfig`` không bị mutate sau khi tạo.
-    Nếu cần đổi cấu hình trước khi run bắt đầu, tầng service sẽ tạo instance mới.
-
-    Parameters
-    ----------
-    name:
-        Tên dễ đọc cho run.
-    dataset_source:
-        Đường dẫn CSV hoặc mô tả bảng/query MySQL. Dùng để truy vết nguồn dữ liệu.
-
-    Các field Kalman, validate qua ``KalmanConfig``
-    ------------------------------------------------
-    x0, P0, Q, R0, R_min, R_max, alpha
-
-    Tỷ lệ chia theo thời gian
-    -------------------------
-    train_ratio, val_ratio, test_ratio phải dương và tổng bằng 1.0.
-
-    Các field ARX, validate qua ``ARXTrainConfig``
-    ----------------------------------------------
-    arx_na, arx_nb, arx_nk
-    arx_input_cols là tuple tên cột lấy từ field map của ARX.
-
-    Tiền xử lý
-    ----------
-    preprocessing_policy là một trong "keep_last", "interpolate", "skip".
-    """
 
     # Metadata của run
     name: str = "unnamed_run"
@@ -115,9 +84,6 @@ class RunConfig:
     # ── Validate ──────────────────────────────────────────────────────────────
 
     def __post_init__(self) -> None:
-        # Ép arx_input_cols về tuple bất biến dù caller truyền list, generator...
-        # Vì dataclass frozen nên phải dùng object.__setattr__; gán trực tiếp sẽ
-        # raise FrozenInstanceError.
         try:
             arx_input_cols = tuple(self.arx_input_cols)
         except TypeError as exc:

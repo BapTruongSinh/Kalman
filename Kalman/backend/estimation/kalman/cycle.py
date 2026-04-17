@@ -2,8 +2,7 @@
 Chu kỳ ước lượng Adaptive Kalman cho biến vô hướng Soil_Moisture.
 
 Thuật toán dùng R thích nghi theo innovation và có giới hạn trên/dưới
-(Q được giữ cố định trong từng lần chạy). Quyết định này được chốt ở
-Task #001 (ADR-003).
+(Q được giữ cố định trong từng lần chạy).
 
 Bước dự đoán (time update)
 --------------------------
@@ -25,14 +24,6 @@ Khi không có đo lường
     P_post   = P_prior   (covariance grows with Q in the next prediction step)
     R        unchanged
 
-Ràng buộc thiết kế
-------------------
-- ``step()`` **không bao giờ raise**; mọi lỗi được trả về qua
-  ``cycle_status="error"``.
-- Trạng thái có thể thay đổi được cô lập trong ``KalmanState``; config là
-  frozen dataclass.
-- Prediction adapter là phụ thuộc tùy chọn; nếu thiếu thì hệ thống fallback
-  về posterior trước đó.
 """
 
 from __future__ import annotations
@@ -49,33 +40,33 @@ from ..prediction import PredictionAdapter, PredictionInput, PredictionResult
 
 logger = logging.getLogger(__name__)
 
-_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+_EPOCH = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
 
 def _safe_getattr(obj: object, name: str, default: object) -> object:
-    """Trả về ``getattr(obj, name)`` hoặc *default*; **không bao giờ raise**.
+    """Trả về "getattr(obj, name)" hoặc default;.
 
-    Khác với ``getattr(obj, name, default)`` thông thường, hàm này bắt cả lỗi
+    Khác với "getattr(obj, name, default)" thông thường, hàm này bắt cả lỗi
     do descriptor/property gây ra, để nhánh xử lý lỗi của Kalman không bị raise
     ngược lại khi gặp input xấu.
     """
     try:
         return getattr(obj, name, default)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return default
 
 
 def _safe_finite_float_or_none(value: object) -> float | None:
-    """Ép *value* về ``float`` hữu hạn, hoặc trả ``None``; **không bao giờ raise**.
+    """Ép *value* về "float" hữu hạn, hoặc trả "None"; **không bao giờ raise**.
 
-    Xử lý cả các subclass của ``float`` có thể override ``__float__`` và tự
-    raise lỗi. Cả bước ép kiểu ``float()`` và kiểm tra ``isfinite`` được bọc
-    trong một ``try/except`` để không lỗi nào lọt ra ngoài.
+    Xử lý cả các subclass của "float" có thể override "__float__" và tự
+    raise lỗi. Cả bước ép kiểu "float()" và kiểm tra "isfinite" được bọc
+    trong một "try/except" để không lỗi nào lọt ra ngoài.
     """
     try:
-        f = float(value)  # type: ignore[arg-type]
+        f = float(value)
         return f if math.isfinite(f) else None
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -84,15 +75,12 @@ def _safe_finite_float_or_none(value: object) -> float | None:
 
 @dataclass(frozen=True)
 class KalmanConfig:
-    """Các siêu tham số cho chu kỳ ước lượng Adaptive Kalman.
-
-    Giá trị mặc định khớp với quyết định đã chốt trong ADR-003 (Task #001).
-
+    """Các tham số cho chu kỳ ước lượng Adaptive Kalman.
     Parameters
     ----------
     x0:
         Ước lượng trạng thái ban đầu. Thường đặt bằng giá trị
-        ``Soil_Moisture`` đầu tiên trước khi chạy.
+        "Soil_Moisture" đầu tiên trước khi chạy.
     P0:
         Hiệp phương sai lỗi ban đầu (> 0).
     Q:
@@ -120,9 +108,6 @@ class KalmanConfig:
     alpha: float = 0.95
 
     def __post_init__(self) -> None:
-        # Tất cả số thực phải hữu hạn trước khi kiểm tra cận, để NaN/Inf không
-        # lọt qua âm thầm. Trong Python, so sánh với NaN thường trả False, làm
-        # các điều kiện biên có thể bị bỏ qua và NaN lan vào bộ lọc.
         for _field, _val in (
             ("x0", self.x0),
             ("P0", self.P0),
@@ -159,18 +144,14 @@ class KalmanConfig:
 
 @dataclass
 class KalmanState:
-    """Trạng thái được giữ giữa các lần gọi ``step()`` liên tiếp.
+    """Trạng thái được giữ giữa các lần gọi "step()" liên tiếp.
 
     Attributes
     ----------
-    x_post:
-        Ước lượng posterior hiện tại, tức Soil_Moisture sau lọc.
-    P_post:
-        Hiệp phương sai lỗi posterior hiện tại.
-    R:
-        Hiệp phương sai nhiễu đo lường thích nghi hiện tại.
-    step:
-        Số bước thời gian đã xử lý đến hiện tại, đếm từ 0.
+    x_post: Ước lượng posterior hiện tại, tức Soil_Moisture sau lọc.
+    P_post: Hiệp phương sai lỗi posterior hiện tại.
+    R: Hiệp phương sai nhiễu đo lường thích nghi hiện tại.
+    step: Số bước thời gian đã xử lý đến hiện tại, đếm từ 0.
     """
 
     x_post: float
@@ -180,7 +161,7 @@ class KalmanState:
 
     @classmethod
     def from_config(cls, config: KalmanConfig) -> "KalmanState":
-        """Khởi tạo trạng thái mới từ ``KalmanConfig``."""
+        """Khởi tạo trạng thái mới từ "KalmanConfig"."""
         return cls(x_post=config.x0, P_post=config.P0, R=config.R0)
 
 
@@ -190,58 +171,37 @@ class KalmanState:
 @dataclass(frozen=True)
 class CycleResult:
     """Kết quả đầu ra cho một bước thời gian đã xử lý.
-
-    Chứa các giá trị Kalman cần để ghi vào model Django ``PipelineCycle``
-    (Task #002). Tầng lưu trữ (Task #007) chịu trách nhiệm map các field này
-    sang tên cột trong DB và thêm metadata cấp run như ``slice_type``,
-    ``source_type``, ``created_at``, các tiền tố ``kf_``...
-
     Attributes
     ----------
-    timestamp:
-        Timestamp gốc từ dữ liệu đầu vào.
-    cycle_index:
-        Chỉ số tuần tự trong run, bắt đầu từ 0.
-    raw_soil_moisture:
-        Giá trị đo thô đọc từ dữ liệu, trước tiền xử lý.
-    preprocess_status:
-        Kết quả tiền xử lý: ``"valid"``, ``"kept_last"``,
-        ``"interpolated"`` hoặc ``"skipped"``.
-    arx_predicted:
-        Dự đoán Soil_Moisture bước kế tiếp từ ARX; ``None`` nếu không có.
-    x_prior:
-        Ước lượng trạng thái prior ``x^-_k`` sau bước dự đoán.
-    P_prior:
-        Hiệp phương sai lỗi prior ``P^-_k`` sau bước dự đoán.
-    innovation:
-        Sai lệch đo lường ``e_k = z_k - x_prior``; ``None`` khi không cập nhật.
-    R:
-        Nhiễu đo lường thích nghi ``R_k`` tại bước này.
-    K:
-        Hệ số Kalman gain ``K_k``; ``None`` khi không có cập nhật đo lường.
-    x_posterior:
-        Ước lượng trạng thái posterior ``x_k`` sau lọc.
-    P_posterior:
-        Hiệp phương sai lỗi posterior ``P_k``.
+    timestamp: Timestamp gốc từ dữ liệu đầu vào.
+    cycle_index: Chỉ số tuần tự trong run, bắt đầu từ 0.
+    raw_soil_moisture: Giá trị đo thô đọc từ dữ liệu, trước tiền xử lý.
+    preprocess_status: Kết quả tiền xử lý: "valid", "kept_last", "interpolated" hoặc "skipped".
+    arx_predicted: Dự đoán Soil_Moisture bước kế tiếp từ ARX; "None" nếu không có.
+    x_prior: Ước lượng trạng thái prior "x^-_k" sau bước dự đoán.
+    P_prior: Hiệp phương sai lỗi prior "P^-_k" sau bước dự đoán.
+    innovation:Sai lệch đo lường "e_k = z_k - x_prior"; "None" khi không cập nhật.
+    R: Nhiễu đo lường thích nghi "R_k" tại bước này.
+    K: Hệ số Kalman gain "K_k"; "None" khi không có cập nhật đo lường.
+    x_posterior: Ước lượng trạng thái posterior "x_k" sau lọc.
+    P_posterior: Hiệp phương sai lỗi posterior "P_k".
     cycle_status:
-        ``"ok"``: cập nhật bình thường có đo lường.
-        ``"skipped_no_measurement"``: thiếu đo lường, giữ prior làm posterior.
-        ``"error"``: có lỗi bất ngờ, trạng thái không đổi.
+        "ok": cập nhật bình thường có đo lường.
+        "skipped_no_measurement": thiếu đo lường, giữ prior làm posterior.
+        "error": có lỗi bất ngờ, trạng thái không đổi.
     adaptive_status:
-        ``"R_updated"``: R thích nghi được tính ở bước này.
-        ``"R_skipped"``: không có đo lường, R giữ nguyên.
-        ``"skipped"``: bỏ qua bước do nhánh lỗi.
-    latency_ms:
-        Thời gian xử lý bước này tính bằng mili giây.
-    error_message:
-        Mô tả lỗi dạng dễ đọc khi ``cycle_status == "error"``.
+        "R_updated": R thích nghi được tính ở bước này.
+        "R_skipped": không có đo lường, R giữ nguyên.
+        "skipped": bỏ qua bước do nhánh lỗi.
+    latency_ms: Thời gian xử lý bước này tính bằng mili giây.
+    error_message: Mô tả lỗi dạng dễ đọc khi "cycle_status == "error".
     """
 
-    # Định danh
+    # int
     timestamp: datetime
     cycle_index: int
 
-    # Dữ liệu thô / tiền xử lý
+    # Dữ liệu raw
     raw_soil_moisture: float | None
     preprocess_status: str
 
@@ -257,7 +217,7 @@ class CycleResult:
     x_posterior: float
     P_posterior: float
 
-    # Chẩn đoán
+    # Dự đoán
     cycle_status: str
     adaptive_status: str
     latency_ms: float | None = None
@@ -270,28 +230,8 @@ class CycleResult:
 class AdaptiveKalmanCycle:
     """Bộ ước lượng Adaptive Kalman vô hướng cho Soil_Moisture.
 
-    Một instance tương ứng với một lần chạy ước lượng. Gọi :meth:`step` cho
-    từng ``ProcessedRecord`` đầu vào, hoặc dùng :meth:`replay` để chạy cả chuỗi.
-
-    Example
-    -------
-    ::
-
-        config = KalmanConfig(x0=first_sm, Q=0.05)
-        estimator = AdaptiveKalmanCycle(config, adapter=arx_adapter)
-
-        for i, record in enumerate(test_records):
-            result = estimator.step(record, cycle_index=i)
-            print(result.x_posterior, result.R, result.cycle_status)
-
-    Parameters
-    ----------
-    config:
-        Bộ siêu tham số dạng frozen.
-    adapter:
-        Prediction adapter tùy chọn. Nếu có và ``predict()`` trả ``"ok"``, giá
-        trị dự đoán được dùng làm prior mean. Nếu không có hoặc dự đoán lỗi,
-        hệ thống dùng posterior trước đó.
+    Một instance tương ứng với một lần chạy ước lượng. Gọi :meth:'step' cho
+    từng "ProcessedRecord" đầu vào, hoặc dùng :meth:'replay' để chạy cả chuỗi.
     """
 
     def __init__(
@@ -302,11 +242,9 @@ class AdaptiveKalmanCycle:
         self._config = config
         self._adapter = adapter
         self._state: KalmanState = KalmanState.from_config(config)
-        # Lịch sử nhân quả: chỉ gồm các record đã xử lý, truyền vào adapter.predict().
         self._history: list[ProcessedRecord] = []
 
-    # ── Truy cập public dạng chỉ đọc ──────────────────────────────────────────
-
+    # ── Truy cập public dạng chỉ đọc 
     @property
     def state(self) -> KalmanState:
         """Trạng thái hiện tại của bộ lọc, trả về reference chỉ đọc theo quy ước."""
@@ -324,41 +262,20 @@ class AdaptiveKalmanCycle:
 
     # ── Một bước xử lý ────────────────────────────────────────────────────────
 
-    def step(
-        self,
-        record: ProcessedRecord,
-        *,
-        cycle_index: int,
-    ) -> CycleResult:
+    def step(self, record: ProcessedRecord, cycle_index: int,) -> CycleResult:
         """Xử lý một bước thời gian.
 
-        **Không bao giờ raise**; mọi lỗi được trả qua ``cycle_status="error"``
+        Không bao giờ ném lỗi, mọi lỗi được trả qua "cycle_status="error""
         để caller luôn thu được kết quả và có thể chạy tiếp.
-
-        Lịch sử nội bộ và bộ đếm step vẫn được cập nhật dù bước đó thành công
-        hay lỗi.
-
-        Parameters
-        ----------
-        record:
-            Record đã tiền xử lý cho bước thời gian này.
-        cycle_index:
-            Chỉ số tuần tự do caller truyền vào, bắt đầu từ 0 trong run.
-
-        Returns
-        -------
-        CycleResult
-            Luôn là một object kết quả hợp lệ dạng frozen.
         """
         t0 = time.perf_counter()
         result: CycleResult
         try:
             result = self._step_impl(record, cycle_index=cycle_index, t0=t0)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.exception("KalmanCycle step %d raised unexpectedly", cycle_index)
             elapsed = (time.perf_counter() - t0) * 1000.0
-            # _safe_getattr bọc getattr trong try/except, nên lỗi từ
-            # descriptor/property không thể thoát ra ngoài nhánh xử lý lỗi.
+            # _safe_getattr bọc getattr trong try/except
             _raw = _safe_getattr(record, "raw", None)
             _ts_raw = _safe_getattr(_raw, "timestamp", _EPOCH)
             _ts: datetime = _ts_raw if isinstance(_ts_raw, datetime) else _EPOCH
@@ -402,22 +319,20 @@ class AdaptiveKalmanCycle:
         *,
         start_index: int = 0,
     ) -> list[CycleResult]:
-        """Chạy cả chuỗi và trả một :class:`CycleResult` cho mỗi record.
+        """
+        Chạy cả chuỗi và trả một :class:'CycleResult' cho mỗi record.
 
         Hàm này chạy tiếp từ state hiện tại; muốn chạy lại từ đầu thì tạo
-        instance :class:`AdaptiveKalmanCycle` mới.
+        instance :class:'AdaptiveKalmanCycle' mới.
 
         Parameters
         ----------
-        records:
-            Chuỗi record đã tiền xử lý theo thứ tự thời gian.
-        start_index:
-            Offset cộng vào ``cycle_index`` của từng bước.
+        records: Chuỗi record đã tiền xử lý theo thứ tự thời gian.
+        start_index: Offset cộng vào "cycle_index" của từng bước.
 
         Returns
         -------
-        list[CycleResult]
-            Danh sách kết quả có cùng độ dài với *records*.
+        list[CycleResult] Danh sách kết quả có cùng độ dài với *records*.
         """
         return [
             self.step(rec, cycle_index=start_index + i)
@@ -426,20 +341,11 @@ class AdaptiveKalmanCycle:
 
     # ── Triển khai nội bộ ─────────────────────────────────────────────────────
 
-    def _step_impl(
-        self,
-        record: ProcessedRecord,
-        *,
-        cycle_index: int,
-        t0: float,
-    ) -> CycleResult:
-        """Logic ước lượng chính, được gọi bên trong try/except của :meth:`step`."""
+    def _step_impl(self, record: ProcessedRecord, *, cycle_index: int, t0: float, ) -> CycleResult:
         cfg = self._config
         state = self._state
 
         # ── 1. Hỏi prediction adapter để dự báo bước kế tiếp ─────────────────
-        # Chỉ truyền phần đuôi history mà adapter thật sự cần, để replay giữ
-        # độ phức tạp O(n) thay vì O(n²) trên chuỗi dài.
         arx_result: PredictionResult | None = None
         if self._adapter is not None:
             min_hist = getattr(self._adapter, "min_history_len", 0)
@@ -457,19 +363,16 @@ class AdaptiveKalmanCycle:
             else None
         )
 
-        # ── 2. Time update (bước dự đoán) ────────────────────────────────────
-        # Prior mean: dùng dự đoán ARX nếu có, nếu không thì giữ posterior trước.
+        # ── 2. Time update (bước dự đoán)
+        # dùng dự đoán ARX nếu có, nếu không thì giữ posterior trước.
         x_prior: float = (
             arx_predicted if arx_predicted is not None else state.x_post
         )
         P_prior: float = state.P_post + cfg.Q
 
-        # ── 3. Kiểm tra có đo lường hay không ────────────────────────────────
+        # ── 3. Kiểm tra có đo lường hay không
         z: float | None = record.soil_moisture
         preprocess_status: str = record.preprocess_status
-
-        # "skipped" nghĩa là đo lường đã bị loại bỏ ở bước tiền xử lý; trong
-        # Kalman xem như không có đo lường.
         measurement_ok: bool = (
             z is not None and preprocess_status != "skipped"
         )
@@ -510,7 +413,7 @@ class AdaptiveKalmanCycle:
         R_raw: float = cfg.alpha * state.R + (1.0 - cfg.alpha) * e * e
         R_new: float = float(max(cfg.R_min, min(cfg.R_max, R_raw)))
 
-        # Kalman gain dạng vô hướng cho state 1 chiều.
+        # Kalman gain dạng vô hướng
         K: float = P_prior / (P_prior + R_new)
 
         # Posterior sau khi kết hợp prior với đo lường.
@@ -536,8 +439,6 @@ class AdaptiveKalmanCycle:
             adaptive_status="R_updated",
             latency_ms=elapsed,
         )
-
-        # Mutate state sau cùng, sau khi CycleResult đã được tạo hoàn chỉnh.
         state.x_post = x_post
         state.P_post = P_post
         state.R = R_new

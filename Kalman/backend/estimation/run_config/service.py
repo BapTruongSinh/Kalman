@@ -1,20 +1,5 @@
 """
-Service của RunConfig: ghi DB và quản lý vòng đời cấu hình.
-
-Trách nhiệm
------------
-1. ``create_run``: ghi ``ExperimentRun`` + ``ExperimentConfig`` từ
-   ``RunConfig`` trong một transaction.
-2. ``load_config``: dựng lại ``RunConfig`` từ run id đã có.
-3. ``update_config``: thay config của một run còn *pending*; khi run đã bắt đầu
-   thì raise ``ConfigFrozenError``.
-
-Mô hình quyền ở v1
-------------------
-Không cho đổi cấu hình khi ``ExperimentRun.status`` không còn ``"pending"``.
-Đây là invariant cứng của tầng service; v1 chưa có cơ chế phân quyền theo role.
-Ràng buộc được ghi ở ``config.py`` và enforce tại đây để Task #007 hoặc caller
-nào cố mutate run đang chạy sẽ nhận lỗi rõ ràng thay vì ghi đè âm thầm.
+Service của RunConfig: ghi DB và quản lý vòng đời cấu hình
 """
 
 from __future__ import annotations
@@ -39,29 +24,7 @@ def create_run(
     notes: str | None = None,
     owner=None,
 ) -> ExperimentRun:
-    """Tạo ``ExperimentRun`` và snapshot ``ExperimentConfig`` trong một transaction.
 
-    Dòng ``ExperimentConfig`` lưu đúng giá trị tham số để sau này có thể tái
-    lập run. ``raw_config_json`` lưu snapshot JSON đầy đủ để dễ tương thích khi
-    schema phát triển.
-
-    Parameters
-    ----------
-    config:
-        Instance ``RunConfig`` đã validate.
-    run_type:
-        Choice string của ``ExperimentRun.RunType``; mặc định ``"offline_replay"``.
-    notes:
-        Ghi chú dạng text tùy chọn lưu trên dòng run.
-    owner:
-        User được phép POST sample live cho run này (``ExperimentRun.owner``).
-        Với offline replay thì thường bỏ qua, trừ khi caller muốn set.
-
-    Returns
-    -------
-    ExperimentRun
-        Dòng run mới tạo, có ``status="pending"``.
-    """
     with transaction.atomic():
         run = ExperimentRun.objects.create(
             name=config.name,

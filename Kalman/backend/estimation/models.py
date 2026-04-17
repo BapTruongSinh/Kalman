@@ -1,8 +1,5 @@
 """
 Các model Django ORM cho pipeline ước lượng Adaptive Kalman.
-
-Schema được thiết kế ở task #002; xem docs/technical/DATABASE.md để biết đầy đủ.
-Tất cả bảng dùng charset utf8mb4 theo cấu hình trong Django DATABASES.
 """
 
 from django.conf import settings
@@ -72,7 +69,6 @@ class ExperimentConfig(models.Model):
     """
     Snapshot cấu hình cố định khi tạo run.
     Quan hệ one-to-one với ExperimentRun để đảm bảo có thể tái lập kết quả.
-    Giá trị mặc định bám theo các default đã chốt trong ADR-003.
     """
 
     class PreprocessPolicy(models.TextChoices):
@@ -86,7 +82,7 @@ class ExperimentConfig(models.Model):
         related_name="config",
     )
 
-    # Tham số khởi tạo Kalman theo default ADR-003.
+    # Tham số khởi tạo Kalman theo default
     x0 = models.FloatField(
         default=0.0,
         help_text="Initial state estimate; set to first observed Soil_Moisture before run starts",
@@ -128,8 +124,8 @@ class ExperimentConfig(models.Model):
 
 class ARXArtifact(models.Model):
     """
-    Hệ số model ARX đã train và tóm tắt hiệu năng.
-    Quan hệ one-to-one với ExperimentRun; tạo sau khi train ARX trên train slice.
+    Hệ số model ARX đã train và tóm tắt hiệu năng
+    Quan hệ one-to-one với ExperimentRun
     """
 
     run = models.OneToOneField(
@@ -143,7 +139,7 @@ class ARXArtifact(models.Model):
     nb = models.IntegerField()
     nk = models.IntegerField()
 
-    # Nguồn gốc/tầm thời gian của dữ liệu train.
+    # Nguồn gốc thời gian của dữ liệu train.
     n_train_samples = models.IntegerField()
     train_start_ts = models.DateTimeField()
     train_end_ts = models.DateTimeField()
@@ -183,7 +179,6 @@ class PipelineCycle(models.Model):
     dự đoán ARX, thông số nội bộ Kalman và cấu hình qua run_id.
     """
 
-    # Dùng BigAutoField tường minh để khớp migration và DEFAULT_AUTO_FIELD override.
     id = models.BigAutoField(primary_key=True)
 
     class SliceType(models.TextChoices):
@@ -284,9 +279,6 @@ class PipelineCycle(models.Model):
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
-
-    # Dedupe tương thích MySQL: partial unique index không ổn định trên vài cấu hình;
-    # xem ingest_dedupe_key + uq_cycles_run_ingest_dedupe trong Meta.constraints.
     ingest_dedupe_key = models.CharField(
         max_length=191,
         help_text=(
@@ -347,7 +339,6 @@ class EvaluationSummary(models.Model):
     """
     Metric tổng hợp theo từng run và từng data slice.
     Được ghi sau khi replay hoàn tất.
-    Row của slice 'test' là acceptance gate chính thức theo ADR-003.
     """
 
     class SliceType(models.TextChoices):
@@ -376,7 +367,6 @@ class EvaluationSummary(models.Model):
     rmse_filtered = models.FloatField(null=True, blank=True)
     mae_filtered = models.FloatField(null=True, blank=True)
 
-    # --- Metric đạt/ngưỡng theo ADR-003 ---
     var_diff_raw = models.FloatField(
         null=True, blank=True,
         help_text="var(diff(raw_soil_moisture))"
@@ -473,7 +463,6 @@ class EvaluationSummary(models.Model):
 
     @property
     def passes_acceptance_gate(self) -> bool | None:
-        """True nếu cả ba tiêu chí ADR-003 đều pass, None nếu có flag chưa biết."""
         flags = (
             self.pass_variance_reduction,
             self.pass_rmse_guardrail,

@@ -1,23 +1,5 @@
 """
-Tầng lưu trữ pipeline (Task #007).
-
-Trách nhiệm
------------
-* Map ``CycleResult`` thành một instance ORM ``PipelineCycle`` chưa lưu, gồm
-  cả việc đổi tên sang các cột tiền tố ``kf_`` và copy cột sensor thô từ
-  ``ProcessedRecord`` tương ứng nếu có.
-* Bulk-insert các batch ``PipelineCycle`` hiệu quả.
-* Chuyển trạng thái ``ExperimentRun`` theo vòng đời:
-  PENDING → RUNNING → COMPLETED | FAILED | ABORTED.
-
-Ràng buộc thiết kế
-------------------
-* ``map_result_to_cycle`` là **pure function**, không gọi DB. Tất cả logic đổi
-  field nằm ở đây để đường bulk-insert chỉ lo ghi dữ liệu.
-* ``bulk_save_cycles`` gọi một ``bulk_create`` theo batch, không INSERT từng dòng.
-* Chuyển trạng thái dùng ``QuerySet.update`` có điều kiện, tức một câu UPDATE,
-  để tránh race condition; nếu pre-condition không đúng thì raise
-  ``RunStateError``.
+Tầng lưu trữ pipeline
 """
 
 from __future__ import annotations
@@ -43,16 +25,6 @@ def ingest_dedupe_key_for_persist(
     cycle_index: int,
     sample_ts: datetime | None = None,
 ) -> str:
-    """Tạo khóa unique an toàn cho MySQL cho ``PipelineCycle.ingest_dedupe_key``.
-
-    Một số cấu hình MySQL không tạo được partial ``UNIQUE`` index kiểu
-    ``WHERE source_type='live'``, nên hệ thống dùng key string tường minh.
-
-    * **live**: ``live|{run_id}|{UTC ISO-8601 timestamp}``, tối đa một dòng live
-      cho mỗi run và mỗi timestamp sensor, giúp retry không ghi trùng.
-    * **csv_replay / mysql_replay**: ``csv|...`` / ``mysql|...`` cộng
-      ``cycle_index`` pad số 0, vì các dòng CSV có thể trùng ``sample_ts``.
-    """
     if source_type == PipelineCycle.SourceType.LIVE:
         if sample_ts is None:
             raise ValueError("ingest_dedupe_key_for_persist: sample_ts required for live")
@@ -70,11 +42,7 @@ def ingest_dedupe_key_for_persist(
 
 
 def _require_choice(value: str, choices: type, field: str) -> str:
-    """Validate *value* theo một class TextChoices; sai thì raise ``ValueError``.
-
-    Đây là lớp chặn ở boundary lưu trữ, để caller không thể âm thầm ghi enum rác
-    vào bảng truy vết. Các ``CheckConstraint`` tương ứng trong model sẽ chặn
-    thêm ở tầng DB.
+    """Validate *value* theo một class TextChoices; sai thì raise "ValueError".
     """
     valid = {v for v, _ in choices.choices}
     if value not in valid:
@@ -91,14 +59,12 @@ def _require_choice(value: str, choices: type, field: str) -> str:
 class RunStateError(RuntimeError):
     """Raise khi chuyển trạng thái run không hợp lệ.
 
-    Ví dụ: gọi ``begin_run`` trên run đã ``RUNNING``, hoặc gọi ``end_run`` trên
-    run vẫn còn ``PENDING``.
+    Ví dụ: gọi "begin_run" trên run đã "RUNNING", hoặc gọi "end_run" trên
+    run vẫn còn "PENDING".
     """
 
 
-# ── Ánh xạ field ──────────────────────────────────────────────────────────────
-
-# Các trạng thái kết thúc mà ``end_run`` chấp nhận.
+# Các trạng thái kết thúc mà "end_run" chấp nhận.
 _TERMINAL_STATUSES = frozenset({
     ExperimentRun.Status.COMPLETED,
     ExperimentRun.Status.FAILED,
@@ -113,10 +79,9 @@ def map_result_to_cycle(
     source_type: str = PipelineCycle.SourceType.CSV_REPLAY,
     record: ProcessedRecord | None = None,
 ) -> PipelineCycle:
-    """Map ``CycleResult`` thành instance ORM ``PipelineCycle`` chưa lưu.
+    """Map "CycleResult" thành instance ORM "PipelineCycle" chưa lưu.
 
-    Đây là **pure function**, không truy cập database. Muốn ghi DB thì dùng
-    kèm :func:`bulk_save_cycles`.
+    Hàm này không truy cập database. Muốn ghi DB thì dùng func :func:'bulk_save_cycles'.
 
     Ánh xạ field
     ------------
@@ -138,32 +103,7 @@ def map_result_to_cycle(
     cycle_status             → cycle_status
     error_message            → error_message
     latency_ms               → latency_ms
-
-    Metadata cấp run do caller truyền vào:
-    run, slice_type, source_type → PipelineCycle columns of the same name.
-
-    Tất cả enum field (``slice_type``, ``source_type``, ``preprocess_status``,
-    ``adaptive_status``, ``cycle_status``) được validate theo ``TextChoices``
-    trước khi tạo instance. Giá trị lạ sẽ raise ``ValueError`` ngay, trước khi
-    ghi DB.
-
-    Parameters
-    ----------
-    result:
-        Đầu ra của ``AdaptiveKalmanCycle.step()``.
-    run:
-        ``ExperimentRun`` cha, phải đã được lưu trong DB.
-    slice_type:
-        Một trong ``"train"``, ``"validation"``, ``"test"``.
-    source_type:
-        Một trong ``"csv_replay"``, ``"mysql_replay"``, ``"live"``; mặc định là
-        ``"csv_replay"``.
-    record:
-        ``ProcessedRecord`` tùy chọn đã sinh ra result này. Nếu có, các giá trị
-        sensor thô (temperature, humidity, light, drip, mist, fan) được copy
-        sang các cột ``raw_*`` tương ứng để truy vết đầy đủ.
     """
-    # ── Validate enum ở boundary lưu trữ ─────────────────────────────────────
     _require_choice(slice_type, PipelineCycle.SliceType, "slice_type")
     _require_choice(source_type, PipelineCycle.SourceType, "source_type")
     _require_choice(result.preprocess_status, PipelineCycle.PreprocessStatus, "preprocess_status")
@@ -224,23 +164,10 @@ def bulk_save_cycles(
     *,
     batch_size: int = 500,
 ) -> int:
-    """Ghi một chuỗi instance ``PipelineCycle`` chưa lưu xuống DB.
+    """Ghi một chuỗi instance "PipelineCycle" chưa lưu xuống DB.
 
-    Dùng một lần gọi ``bulk_create`` theo *batch_size* để tăng throughput.
-    Không gọi ``save()`` từng dòng trong vòng lặp nóng.
-
-    Parameters
-    ----------
-    cycles:
-        Các object ``PipelineCycle`` chưa lưu, thường được tạo bởi
-        :func:`map_result_to_cycle`.
-    batch_size:
-        Số dòng mỗi câu INSERT, mặc định 500.
-
-    Returns
-    -------
-    int
-        Số dòng đã insert.
+    Dùng một lần gọi "bulk_create" theo *batch_size* để tăng throughput.
+    Không gọi "save()" từng dòng trong vòng lặp
     """
     if not cycles:
         return 0
@@ -257,17 +184,7 @@ def bulk_save_cycles(
 
 
 def begin_run(run: ExperimentRun) -> None:
-    """Chuyển *run* từ ``PENDING`` sang ``RUNNING``.
-
-    Dùng ``QuerySet.update`` có điều kiện để thao tác chuyển trạng thái là
-    atomic kể cả khi có truy cập đồng thời. Object *run* local được refresh từ
-    database sau khi update thành công.
-
-    Raises
-    ------
-    RunStateError
-        If *run* is not currently ``PENDING`` (e.g. already ``RUNNING`` or
-        ``COMPLETED``).
+    """Chuyển run từ "PENDING" sang "RUNNING"
     """
     updated = ExperimentRun.objects.filter(
         pk=run.pk,
@@ -288,25 +205,7 @@ def begin_run(run: ExperimentRun) -> None:
 
 
 def end_run(run: ExperimentRun, status: str) -> None:
-    """Chuyển *run* từ ``RUNNING`` sang trạng thái kết thúc.
-
-    Các trạng thái kết thúc hợp lệ: ``"completed"``, ``"failed"``,
-    ``"aborted"``. Object *run* local được refresh sau khi update thành công.
-
-    Parameters
-    ----------
-    run:
-        ``ExperimentRun`` cần kết thúc.
-    status:
-        Trạng thái kết thúc đích, phải là ``"completed"``, ``"failed"`` hoặc
-        ``"aborted"``.
-
-    Raises
-    ------
-    ValueError
-        If *status* is not a recognised terminal status.
-    RunStateError
-        Nếu *run* hiện không phải ``RUNNING``.
+    """Chuyển run từ "RUNNING" sang trạng thái kết thúc.
     """
     if status not in _TERMINAL_STATUSES:
         raise ValueError(
