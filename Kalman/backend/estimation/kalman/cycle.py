@@ -40,7 +40,7 @@ from ..prediction import PredictionAdapter, PredictionInput, PredictionResult
 
 logger = logging.getLogger(__name__)
 
-_EPOCH = datetime(2026, 1, 1, tzinfo=timezone.utc)
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
 def _safe_getattr(obj: object, name: str, default: object) -> object:

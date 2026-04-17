@@ -15,8 +15,6 @@ GET /api/runs/{run_id}/series/
         stride -- lấy mẫu mỗi N cycle (mặc định 1, tối đa 1 000).
                   ``limit * stride`` không được vượt 100 000 để tránh DoS.
 
-GET /api/runs/{run_id}/metrics/
-    Trả metric EvaluationSummary cho từng slice dữ liệu của một run.
 """
 
 from django.http import Http404
@@ -25,11 +23,10 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from estimation.models import EvaluationSummary, ExperimentRun, PipelineCycle
+from estimation.models import ExperimentRun, PipelineCycle
 
 from .serializers import (
     CycleSerializer,
-    EvaluationSummarySerializer,
     RunListSerializer,
 )
 
@@ -143,24 +140,3 @@ class RunSeriesView(APIView):
             }
         )
 
-
-class RunMetricsView(APIView):
-    """Trả metric EvaluationSummary theo từng slice dữ liệu."""
-
-    def get(self, request: Request, run_id: int) -> Response:
-        try:
-            run = ExperimentRun.objects.get(pk=run_id)
-        except ExperimentRun.DoesNotExist:
-            raise Http404
-
-        summaries = EvaluationSummary.objects.filter(run=run)
-        return Response(
-            {
-                "run_id": run.pk,
-                "run_name": run.name,
-                "slices": {
-                    s.slice_type: EvaluationSummarySerializer(s).data
-                    for s in summaries
-                },
-            }
-        )

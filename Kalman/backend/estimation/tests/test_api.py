@@ -12,7 +12,6 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from estimation.models import (
-    EvaluationSummary,
     ExperimentConfig,
     ExperimentRun,
     PipelineCycle,
@@ -62,24 +61,6 @@ def _cycle(run: ExperimentRun, index: int, slice_type: str = "test") -> Pipeline
         cycle_status=PipelineCycle.CycleStatus.OK,
         adaptive_status=PipelineCycle.AdaptiveStatus.R_UPDATED,
     )
-
-
-def _summary(run: ExperimentRun, slice_type: str = "test") -> EvaluationSummary:
-    return EvaluationSummary.objects.create(
-        run=run,
-        slice_type=slice_type,
-        n_samples=100,
-        n_valid=98,
-        n_skipped=1,
-        n_error=1,
-        rmse_arx=0.42,
-        rmse_filtered=0.38,
-        variance_reduction=0.25,
-        pass_variance_reduction=True,
-        pass_rmse_guardrail=True,
-        pass_mae_guardrail=True,
-    )
-
 
 # ---------------------------------------------------------------------------
 # Run list
@@ -250,94 +231,3 @@ class TestRunSeriesView:
         assert resp.json()["returned"] <= 1
 
 
-# ---------------------------------------------------------------------------
-# Metrics
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.django_db
-class TestRunMetricsView:
-    def test_404_for_missing_run(self, client):
-        resp = client.get("/api/runs/99999/metrics/")
-        assert resp.status_code == 404
-
-    def test_empty_slices_when_no_summaries(self, client, run):
-        resp = client.get(f"/api/runs/{run.pk}/metrics/")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["run_id"] == run.pk
-        assert body["slices"] == {}
-
-    def test_returns_summary_fields(self, client, run):
-        _summary(run, "test")
-        body = client.get(f"/api/runs/{run.pk}/metrics/").json()
-        assert "test" in body["slices"]
-        s = body["slices"]["test"]
-        expected_fields = {
-            "slice_type",
-            "n_samples",
-            "n_valid",
-            "variance_reduction",
-            "pass_variance_reduction",
-            "pass_rmse_guardrail",
-            "pass_mae_guardrail",
-            "cycle_success_rate",
-            "sample_loss_rate",
-            "passes_acceptance_gate",
-        }
-        assert expected_fields.issubset(s.keys())
-
-    def test_passes_acceptance_gate_true(self, client, run):
-        _summary(run, "test")
-        s = client.get(f"/api/runs/{run.pk}/metrics/").json()["slices"]["test"]
-        assert s["passes_acceptance_gate"] is True
-
-    def test_passes_acceptance_gate_null_when_any_flag_is_null(self, client, run):
-        """API must return null (not false) when gate flags are not yet evaluated."""
-        from estimation.models import EvaluationSummary
-
-        EvaluationSummary.objects.create(
-            run=run,
-            slice_type="validation",
-            n_samples=50,
-            n_valid=48,
-            n_skipped=1,
-            n_error=1,
-            # pass_variance_reduction intentionally omitted (NULL in DB)
-            pass_rmse_guardrail=True,
-            pass_mae_guardrail=True,
-        )
-        s = client.get(f"/api/runs/{run.pk}/metrics/").json()["slices"]["validation"]
-        assert s["passes_acceptance_gate"] is None, (
-            f"Expected null but got {s['passes_acceptance_gate']!r}; "
-            "backend should propagate unknown gate state instead of coercing to False"
-        )
-
-    def test_passes_acceptance_gate_false_when_one_flag_fails(self, client, run):
-        from estimation.models import EvaluationSummary
-
-        EvaluationSummary.objects.create(
-            run=run,
-            slice_type="train",
-            n_samples=100,
-            n_valid=90,
-            n_skipped=5,
-            n_error=5,
-            pass_variance_reduction=False,
-            pass_rmse_guardrail=True,
-            pass_mae_guardrail=True,
-        )
-        s = client.get(f"/api/runs/{run.pk}/metrics/").json()["slices"]["train"]
-        assert s["passes_acceptance_gate"] is False
-
-    def test_computed_cycle_success_rate(self, client, run):
-        _summary(run, "test")
-        s = client.get(f"/api/runs/{run.pk}/metrics/").json()["slices"]["test"]
-        assert abs(s["cycle_success_rate"] - 0.98) < 0.001
-
-    def test_multiple_slices(self, client, run):
-        _summary(run, "train")
-        _summary(run, "validation")
-        _summary(run, "test")
-        body = client.get(f"/api/runs/{run.pk}/metrics/").json()
-        assert set(body["slices"].keys()) == {"train", "validation", "test"}

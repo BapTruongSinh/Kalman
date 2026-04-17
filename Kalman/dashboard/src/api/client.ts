@@ -1,4 +1,4 @@
-import type { MetricsResponse, RunSummary, SeriesResponse } from './types'
+import type { RunSummary, SeriesResponse } from './types'
 
 const BASE = '/api'
 
@@ -32,6 +32,3 @@ export function fetchSeries(
   return get<SeriesResponse>(`/runs/${runId}/series/${query}`)
 }
 
-export function fetchMetrics(runId: number): Promise<MetricsResponse> {
-  return get<MetricsResponse>(`/runs/${runId}/metrics/`)
-}

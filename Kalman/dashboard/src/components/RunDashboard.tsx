@@ -1,14 +1,13 @@
 /**
- * RunDashboard fetches series and metrics for one selected run and
- * composes the SliceChart, AdaptiveStatusBar, and MetricsPanel.
+ * RunDashboard fetches series for one selected run and composes the chart
+ * with adaptive status diagnostics.
  */
 
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { fetchMetrics, fetchSeries } from '../api/client'
-import type { CyclePoint, SeriesResponse, MetricsResponse } from '../api/types'
+import { fetchSeries } from '../api/client'
+import type { CyclePoint, SeriesResponse } from '../api/types'
 import { AdaptiveStatusBar } from './AdaptiveStatusBar'
-import { MetricsPanel } from './MetricsPanel'
 import { SliceChart } from './SliceChart'
 
 const SLICE_OPTIONS = ['all', 'train', 'validation', 'test'] as const
@@ -51,13 +50,6 @@ export function RunDashboard({ runId }: Props) {
       }),
     staleTime: 60_000,
   })
-
-  const { data: metrics, isLoading: metricsLoading } =
-    useQuery<MetricsResponse>({
-      queryKey: ['metrics', runId],
-      queryFn: () => fetchMetrics(runId),
-      staleTime: 60_000,
-    })
 
   const chartData = series ? filterBySlice(series.data, slice) : []
 
@@ -152,20 +144,6 @@ export function RunDashboard({ runId }: Props) {
             <AdaptiveStatusBar data={pts} />
           </div>
         ))}
-
-      {/* Metrics */}
-      <section aria-label="Evaluation metrics">
-        <h2 className="text-base font-semibold text-slate-200 mb-3">
-          Evaluation metrics
-        </h2>
-        {metricsLoading ? (
-          <div className="text-slate-400 text-sm" role="status">
-            Loading metrics…
-          </div>
-        ) : metrics ? (
-          <MetricsPanel metrics={metrics} />
-        ) : null}
-      </section>
     </div>
   )
 }

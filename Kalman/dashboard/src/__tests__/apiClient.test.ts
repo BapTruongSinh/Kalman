@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { fetchRuns, fetchSeries, fetchMetrics } from '../api/client'
+import { fetchRuns, fetchSeries } from '../api/client'
 
 const RUNS = [{ id: 1, name: 'run-1', run_type: 'offline_replay', status: 'completed', created_at: '2024-01-01T00:00:00Z' }]
 
@@ -10,12 +10,6 @@ const SERIES_RESP = {
   total_cycles: 2,
   returned: 2,
   data: [],
-}
-
-const METRICS_RESP = {
-  run_id: 1,
-  run_name: 'run-1',
-  slices: {},
 }
 
 function mockFetch(payload: unknown, ok = true) {
@@ -65,14 +59,6 @@ describe('API client', () => {
       const url = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string
       expect(url).toContain('limit=500')
       expect(url).toContain('stride=2')
-    })
-  })
-
-  describe('fetchMetrics', () => {
-    it('calls correct URL', async () => {
-      mockFetch(METRICS_RESP)
-      await fetchMetrics(42)
-      expect(global.fetch).toHaveBeenCalledWith('/api/runs/42/metrics/')
     })
   })
 })
