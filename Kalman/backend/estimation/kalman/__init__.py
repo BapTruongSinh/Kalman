@@ -1,12 +1,12 @@
 """
-``estimation.kalman`` — Adaptive Kalman-ready estimation cycle.
+``estimation.kalman``: chu kỳ ước lượng Adaptive Kalman.
 
 Public API
 ----------
-``KalmanConfig``           — frozen hyperparameter set (ADR-003 defaults)
-``KalmanState``            — mutable filter state carried between steps
-``CycleResult``            — per-step output; contains the Kalman subset needed to populate ``PipelineCycle``
-``AdaptiveKalmanCycle``    — scalar Soil_Moisture estimator with bounded adaptive R
+``KalmanConfig``           — bộ siêu tham số frozen, mặc định theo ADR-003
+``KalmanState``            — trạng thái bộ lọc được giữ giữa các bước
+``CycleResult``            — đầu ra từng bước, chứa phần Kalman cần ghi ``PipelineCycle``
+``AdaptiveKalmanCycle``    — estimator Soil_Moisture vô hướng với R thích nghi có chặn
 """
 
 from .cycle import AdaptiveKalmanCycle, CycleResult, KalmanConfig, KalmanState

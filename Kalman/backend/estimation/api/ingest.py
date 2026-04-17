@@ -1,21 +1,21 @@
 """
-Live sensor ingestion endpoint (Task #010).
+Endpoint nạp dữ liệu sensor live (Task #010).
 
 Endpoint
 --------
 ``POST /api/ingest/samples/``
 
-Accepts one sensor reading, runs it through the same
-validation/preprocessing pipeline as offline CSV replay, applies one Kalman
-step, persists the ``PipelineCycle`` row, and returns the filtered estimate.
+Nhận một sample sensor, chạy qua cùng pipeline validate/tiền xử lý như replay
+CSV offline, chạy một bước Kalman, lưu dòng ``PipelineCycle`` và trả về giá trị
+ước lượng sau lọc.
 
-Design notes
-------------
-Authentication
-    DRF ``TokenAuthentication``.  This endpoint always requires a token.
-    Read-only dashboard ``GET`` APIs follow ``DASHBOARD_REQUIRE_AUTH`` /
-    ``DEFAULT_PERMISSION_CLASSES`` in Django settings (production defaults
-    to authenticated users unless explicitly opened).
+Ghi chú thiết kế
+----------------
+Xác thực
+    Dùng DRF ``TokenAuthentication``. Endpoint này luôn cần token.
+    Các API ``GET`` chỉ đọc cho dashboard đi theo ``DASHBOARD_REQUIRE_AUTH`` /
+    ``DEFAULT_PERMISSION_CLASSES`` trong Django settings; production mặc định
+    yêu cầu user đã xác thực, trừ khi mở rõ ràng.
 
     Provision a token::
 
@@ -23,21 +23,20 @@ Authentication
 
     Then include the header ``Authorization: Token <key>`` in every POST.
 
-Reconnect safety
-    Kalman state (x_post, P_post, R) is loaded from the *last persisted*
-    ``PipelineCycle`` on each request.  The device may disconnect and
-    reconnect freely — the filter resumes from where it left off.
+An toàn khi reconnect
+    Trạng thái Kalman (x_post, P_post, R) được load từ ``PipelineCycle`` *đã lưu
+    gần nhất* ở mỗi request. Thiết bị có thể mất kết nối rồi reconnect; bộ lọc
+    sẽ chạy tiếp từ điểm đã dừng.
 
-Gap handling
-    Timestamp gaps (device down-time, missed samples) are tolerated.
-    Our Kalman model is not time-varying (Q is fixed), so a gap is handled
-    the same as a normal step with no special treatment needed.
+Xử lý khoảng trống thời gian
+    Chấp nhận gap timestamp do thiết bị tắt hoặc mất sample. Model Kalman hiện
+    tại không biến thiên theo thời gian (Q cố định), nên gap được xử lý như một
+    bước bình thường, không cần xử lý đặc biệt.
 
-ARX prediction
-    Intentionally absent for the v1 live path.  Training ARX requires a
-    batch of offline data; the adapter is ``None`` so the Kalman prior
-    falls back to the previous posterior.  A trained ARX artifact can be
-    wired in a future task once we have a dataset from the live device.
+Dự đoán ARX
+    Đường live ở v1 cố ý chưa dùng ARX. Train ARX cần batch dữ liệu offline;
+    adapter để ``None`` nên prior Kalman fallback về posterior trước đó. Sau này
+    có thể nối artifact ARX đã train khi có dataset từ thiết bị live.
 """
 
 from __future__ import annotations
@@ -76,11 +75,11 @@ _SENSOR_FIELDS = (
 )
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
+# ── Helper ────────────────────────────────────────────────────────────────────
 
 
 def _kalman_config_from_db(exp_config: ExperimentConfig) -> KalmanConfig:
-    """Build a :class:`~..kalman.cycle.KalmanConfig` from a stored snapshot."""
+    """Tạo :class:`~..kalman.cycle.KalmanConfig` từ snapshot đã lưu."""
     return KalmanConfig(
         x0=exp_config.x0,
         P0=exp_config.P0,
@@ -96,27 +95,26 @@ def _restore_state(
     last_cycle: PipelineCycle | None,
     config: KalmanConfig,
 ) -> tuple[KalmanState, int]:
-    """Reconstruct filter state and the next ``cycle_index`` from the DB.
+    """Dựng lại state của bộ lọc và ``cycle_index`` kế tiếp từ DB.
 
     Parameters
     ----------
     last_cycle:
-        Most recent :class:`~..models.PipelineCycle` for the run, or
-        ``None`` if no cycles have been stored yet.
+        :class:`~..models.PipelineCycle` mới nhất của run, hoặc ``None`` nếu
+        chưa lưu cycle nào.
     config:
-        Active :class:`~..kalman.cycle.KalmanConfig` for the run.
+        :class:`~..kalman.cycle.KalmanConfig` đang dùng cho run.
 
     Returns
     -------
     (state, cycle_index)
-        *state* to inject into the estimator before calling ``step()``.
-        *cycle_index* is the 0-based index to assign this new step.
+        *state* sẽ được inject vào estimator trước khi gọi ``step()``.
+        *cycle_index* là index bắt đầu từ 0 cho bước mới này.
 
-    Notes
-    -----
-    When the last cycle has ``None`` for any Kalman field (e.g. after an
-    error cycle), state is reset from *config*.  This ensures a clean
-    reconnect even after a previous step failure.
+    Ghi chú
+    -------
+    Nếu cycle cuối có ``None`` ở bất kỳ field Kalman nào, ví dụ sau cycle lỗi,
+    state được reset từ *config*. Như vậy reconnect vẫn sạch kể cả sau bước lỗi.
     """
     if last_cycle is None:
         return KalmanState.from_config(config), 0
@@ -151,7 +149,7 @@ def _restore_state(
 
 
 def _normalize_sample_ts(ts: datetime) -> datetime:
-    """Return *ts* as timezone-aware UTC (naïve values are treated as UTC)."""
+    """Trả *ts* dạng timezone-aware UTC; timestamp naïve được xem là UTC."""
     if ts.tzinfo is None:
         return ts.replace(tzinfo=timezone.utc)
     return ts.astimezone(timezone.utc)
@@ -167,7 +165,7 @@ def _live_ingest_response_body(
     kf_innovation: float | None,
     idempotent: bool = False,
 ) -> dict:
-    """JSON body for successful live ingest (201 or idempotent 200)."""
+    """Body JSON cho live ingest thành công, gồm 201 hoặc idempotent 200."""
     body: dict = {
         "cycle_index": cycle_index,
         "preprocess_status": preprocess_status,
@@ -184,7 +182,7 @@ def _live_ingest_response_body(
 def _response_from_pipeline_cycle(
     cycle: PipelineCycle, *, idempotent: bool = False
 ) -> dict:
-    """Build the public JSON body from a persisted :class:`~..models.PipelineCycle`."""
+    """Tạo body JSON public từ :class:`~..models.PipelineCycle` đã lưu."""
     return _live_ingest_response_body(
         cycle_index=cycle.cycle_index,
         preprocess_status=cycle.preprocess_status,
@@ -205,7 +203,7 @@ def _nullable_float_equal(a: float | None, b: float | None) -> bool:
 
 
 def _live_sensor_payload_matches(data: dict, cycle: PipelineCycle) -> bool:
-    """True if validated request *data* matches stored ``raw_*`` columns on *cycle*."""
+    """True nếu request *data* đã validate khớp các cột ``raw_*`` trên *cycle*."""
     for field in _SENSOR_FIELDS:
         if not _nullable_float_equal(data.get(field), getattr(cycle, f"raw_{field}")):
             return False
@@ -213,9 +211,9 @@ def _live_sensor_payload_matches(data: dict, cycle: PipelineCycle) -> bool:
 
 
 def _build_raw_record(data: dict, row_index: int) -> RawRecord:
-    """Convert validated serializer data to a :class:`~..ingestion.loader.RawRecord`.
+    """Đổi dữ liệu serializer đã validate thành :class:`~..ingestion.loader.RawRecord`.
 
-    The timestamp is made UTC-aware when it arrives as naïve.
+    Nếu timestamp gửi lên là naïve thì chuyển thành UTC-aware.
     """
     ts = _normalize_sample_ts(data["timestamp"])
     return RawRecord(
@@ -231,13 +229,13 @@ def _build_raw_record(data: dict, row_index: int) -> RawRecord:
     )
 
 
-# ── View ───────────────────────────────────────────────────────────────────────
+# ── View ──────────────────────────────────────────────────────────────────────
 
 
 class LiveIngestView(APIView):
-    """Accept one live sensor sample and run a single Kalman step.
+    """Nhận một sample sensor live và chạy một bước Kalman.
 
-    **Authentication**: ``Authorization: Token <key>`` header required.
+    **Xác thực**: bắt buộc có header ``Authorization: Token <key>``.
 
     **Request body** (JSON):
 
@@ -255,29 +253,28 @@ class LiveIngestView(APIView):
             "fan": 1.0
         }
 
-    All sensor channels except ``timestamp`` and ``run_id`` are optional and
-    accept ``null``.
+    Tất cả kênh sensor trừ ``timestamp`` và ``run_id`` đều tùy chọn và nhận
+    ``null``.
 
-    **Responses**:
+    **Response**:
 
-    * ``201 Created`` — sample accepted; body contains filtered estimate.
-    * ``200 OK`` — same ``run_id`` + ``timestamp`` **and** identical sensor
-      payload was already ingested; body is the existing cycle
-      (``"idempotent": true``). Safe for transport retries.
-    * ``400 Bad Request`` — invalid payload (missing required fields, wrong types).
-    * ``401 Unauthorized`` — missing or invalid token.
-    * ``403 Forbidden`` — authenticated user is not the run ``owner``, or the
-      live run has no ``owner`` assigned (ingestion disabled until one is set).
-    * ``404 Not Found`` — ``run_id`` does not exist or is not a live run.
-    * ``409 Conflict`` — run is not ``"running"``, **or** the same ``timestamp``
-      was already ingested with a **different** sensor payload (cannot overwrite).
+    * ``201 Created``: sample được nhận; body chứa estimate sau lọc.
+    * ``200 OK``: cùng ``run_id`` + ``timestamp`` và payload sensor giống hệt đã
+      ingest trước đó; body là cycle đã có (``"idempotent": true``), an toàn cho retry.
+    * ``400 Bad Request``: payload sai, thiếu field bắt buộc hoặc sai kiểu.
+    * ``401 Unauthorized``: thiếu token hoặc token không hợp lệ.
+    * ``403 Forbidden``: user xác thực không phải ``owner`` của run, hoặc live
+      run chưa gán ``owner`` nên tạm khóa ingest.
+    * ``404 Not Found``: ``run_id`` không tồn tại hoặc không phải live run.
+    * ``409 Conflict``: run không ở ``"running"``, hoặc cùng ``timestamp`` đã
+      ingest với payload sensor **khác** nên không được ghi đè.
     """
 
     authentication_classes = [TokenAuthentication]
     permission_classes = [IsAuthenticated]
 
     def post(self, request: Request) -> Response:  # noqa: PLR0911
-        # ── Deserialize + validate payload ────────────────────────────────────
+        # ── Deserialize và validate payload ──────────────────────────────────
         serializer = LiveSampleSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -285,9 +282,9 @@ class LiveIngestView(APIView):
         data = serializer.validated_data
         run_id: int = data["run_id"]
 
-        # ── Fast pre-check: reject obviously wrong run_id before acquiring lock ─
-        # This is an optimistic guard only — the authoritative checks (type and
-        # status) happen inside the atomic block where the row is locked.
+        # ── Pre-check nhanh: loại run_id sai rõ ràng trước khi lock ──────────
+        # Đây chỉ là guard lạc quan; check có thẩm quyền về type và status nằm
+        # trong atomic block, nơi row đã được lock.
         if not ExperimentRun.objects.filter(
             pk=run_id, run_type=ExperimentRun.RunType.LIVE
         ).exists():
@@ -296,17 +293,16 @@ class LiveIngestView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        # ── Atomic: lock run row, re-check state, reconstruct, step, persist ───
-        # ALL state-sensitive guards (run_type, status) are evaluated *after*
-        # acquiring the row lock so that a concurrent status transition
-        # (running → completed) cannot slip through between the pre-check and
-        # the write.  This eliminates the TOCTOU race reported in the audit.
+        # ── Atomic: lock run, check state, dựng state, step, rồi lưu ─────────
+        # MỌI guard nhạy với state (run_type, status) được kiểm tra *sau khi*
+        # lấy row lock, để chuyển trạng thái đồng thời (running → completed)
+        # không lọt qua giữa pre-check và lúc ghi. Cách này loại race TOCTOU.
         #
-        # The unique constraint on (run, cycle_index) is also protected by the
-        # same lock — only one request per run can compute and save a new
-        # cycle_index at a time.
+        # Unique constraint trên (run, cycle_index) cũng được bảo vệ bởi cùng
+        # lock: tại một thời điểm chỉ một request cho mỗi run được tính và lưu
+        # cycle_index mới.
         with transaction.atomic():
-            # Lock + eager-load config in a single query.
+            # Lock và eager-load config trong một query.
             try:
                 run = ExperimentRun.objects.select_for_update().select_related(
                     "config"
@@ -317,7 +313,7 @@ class LiveIngestView(APIView):
                     status=status.HTTP_404_NOT_FOUND,
                 )
 
-            # Object-level authorization: only the assigned owner may ingest.
+            # Phân quyền cấp object: chỉ owner đã gán mới được ingest.
             if run.owner_id is None:
                 return Response(
                     {
@@ -339,7 +335,7 @@ class LiveIngestView(APIView):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-            # Authoritative status guard — evaluated with the row lock held.
+            # Guard trạng thái có thẩm quyền, chạy khi vẫn đang giữ row lock.
             if run.status != ExperimentRun.Status.RUNNING:
                 return Response(
                     {
@@ -351,7 +347,7 @@ class LiveIngestView(APIView):
                     status=status.HTTP_409_CONFLICT,
                 )
 
-            # Load Kalman config from the already-fetched relation (no extra query).
+            # Load Kalman config từ relation đã fetch, không cần query thêm.
             try:
                 kalman_config = _kalman_config_from_db(run.config)
             except ExperimentConfig.DoesNotExist:
@@ -394,18 +390,18 @@ class LiveIngestView(APIView):
             )
             state, cycle_index = _restore_state(last_cycle, kalman_config)
 
-            # Build the raw record with the now-known cycle_index.
+            # Tạo raw record với cycle_index đã biết.
             raw_record = _build_raw_record(data, row_index=cycle_index)
 
-            # Use validate_live_record — ancillary fields are optional for
-            # live ingestion; only fields that ARE present are range-checked.
+            # Dùng validate_live_record: với live ingest, các field phụ là tùy
+            # chọn; chỉ field nào thật sự có mặt mới bị kiểm tra range.
             # soil_moisture=None → is_valid=False (missing) → preprocess_status="skipped".
-            # A present, in-range soil_moisture → is_valid=True → preprocess_status="valid".
+            # soil_moisture có mặt và trong range → is_valid=True → preprocess_status="valid".
             validation = validate_live_record(raw_record, config=DEFAULT_VALIDATION_CONFIG)
             processed = preprocess_single(raw_record, validation)
 
             estimator = AdaptiveKalmanCycle(kalman_config)
-            estimator._state = state  # inject reconstructed state
+            estimator._state = state  # inject state đã dựng lại từ DB
             cycle_result = estimator.step(processed, cycle_index=cycle_index)
 
             cycle_obj = map_result_to_cycle(
@@ -419,7 +415,7 @@ class LiveIngestView(APIView):
                 with transaction.atomic():
                     cycle_obj.save()
             except IntegrityError:
-                # Rare race: another worker inserted the same dedupe key first.
+                # Race hiếm: worker khác đã insert cùng dedupe key trước.
                 dup = PipelineCycle.objects.filter(
                     run=run,
                     ingest_dedupe_key=dedupe_key,

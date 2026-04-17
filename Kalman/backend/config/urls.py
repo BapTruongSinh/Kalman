@@ -1,4 +1,4 @@
-"""Project-level URL configuration for the Kalman pipeline backend."""
+"""Cấu hình URL cấp project cho backend Kalman pipeline."""
 
 from django.urls import include, path
 

@@ -1,4 +1,4 @@
-"""DRF serializers for the dashboard REST API."""
+"""DRF serializer cho REST API của dashboard."""
 
 from rest_framework import serializers
 
@@ -6,7 +6,7 @@ from estimation.models import EvaluationSummary, ExperimentRun, PipelineCycle
 
 
 class RunListSerializer(serializers.ModelSerializer):
-    """Run list for the dashboard API — omits ``dataset_source`` (path exposure)."""
+    """Danh sách run cho dashboard API; bỏ ``dataset_source`` để tránh lộ path."""
 
     class Meta:
         model = ExperimentRun

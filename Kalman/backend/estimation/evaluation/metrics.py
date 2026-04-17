@@ -1,11 +1,11 @@
 """
-Pure evaluation metric computation.
+Tính toán metric đánh giá thuần túy.
 
-Accepts plain dicts (from QuerySet.values()) so the computation layer
-has no Django or DB dependency — it is unit-testable with synthetic data.
+Hàm nhận dict thường (từ QuerySet.values()), nên tầng tính toán không phụ thuộc
+Django hoặc DB và có thể unit test bằng dữ liệu giả.
 
-ADR-003 acceptance thresholds
-------------------------------
+Ngưỡng chấp nhận ADR-003
+------------------------
 variance_reduction  >= 0.20  (20 %)
 rmse_ratio          <= 1.05
 mae_ratio           <= 1.05
@@ -17,7 +17,7 @@ from typing import Optional, Sequence
 
 import numpy as np
 
-# ── ADR-003 acceptance thresholds ─────────────────────────────────────────────
+# ── Ngưỡng chấp nhận ADR-003 ─────────────────────────────────────────────────
 VARIANCE_REDUCTION_MIN: float = 0.20
 RMSE_RATIO_MAX: float = 1.05
 MAE_RATIO_MAX: float = 1.05
@@ -25,85 +25,85 @@ MAE_RATIO_MAX: float = 1.05
 
 @dataclass(frozen=True)
 class SliceMetrics:
-    """All evaluation metrics for a single data slice (train / validation / test).
+    """Tất cả metric đánh giá cho một slice dữ liệu (train / validation / test).
 
-    Derived properties
-    ------------------
+    Thuộc tính suy ra
+    -----------------
     cycle_success_rate : n_valid / n_samples
     sample_loss_rate   : (n_skipped + n_error) / n_samples
     passes_acceptance_gate : True if all three ADR-003 flags are True
     """
 
-    # ── Sample counts ──────────────────────────────────────────────────────────
+    # ── Số lượng sample ──────────────────────────────────────────────────────
     n_samples: int = 0
     n_valid: int = 0
     n_skipped: int = 0
     n_error: int = 0
 
-    # ── Adaptive status distribution ───────────────────────────────────────────
+    # ── Phân bố trạng thái adaptive ──────────────────────────────────────────
     n_r_updated: int = 0
     n_r_skipped: int = 0
     n_adaptive_skipped: int = 0
 
-    # ── Latency ────────────────────────────────────────────────────────────────
+    # ── Độ trễ ───────────────────────────────────────────────────────────────
     latency_mean_ms: Optional[float] = None
     latency_p95_ms: Optional[float] = None
 
-    # ── ARX accuracy (when arx_predicted & reference available) ───────────────
+    # ── Độ chính xác ARX, khi có arx_predicted và reference ─────────────────
     rmse_arx: Optional[float] = None
     mae_arx: Optional[float] = None
 
-    # ── Kalman accuracy (when kf_x_posterior & reference available) ───────────
+    # ── Độ chính xác Kalman, khi có kf_x_posterior và reference ─────────────
     rmse_filtered: Optional[float] = None
     mae_filtered: Optional[float] = None
 
-    # ── Variance reduction ────────────────────────────────────────────────────
+    # ── Mức giảm phương sai ──────────────────────────────────────────────────
     var_diff_raw: Optional[float] = None
     var_diff_filtered: Optional[float] = None
     variance_reduction: Optional[float] = None
 
-    # ── Guardrail ratios ──────────────────────────────────────────────────────
+    # ── Tỷ lệ guardrail ──────────────────────────────────────────────────────
     rmse_ratio: Optional[float] = None
     mae_ratio: Optional[float] = None
 
-    # ── Innovation diagnostics ─────────────────────────────────────────────────
+    # ── Chẩn đoán innovation ────────────────────────────────────────────────
     innovation_mean: Optional[float] = None
     innovation_std: Optional[float] = None
     innovation_max_abs: Optional[float] = None
 
-    # ── Adaptive R diagnostics ────────────────────────────────────────────────
+    # ── Chẩn đoán R thích nghi ──────────────────────────────────────────────
     R_mean: Optional[float] = None
     R_min_observed: Optional[float] = None
     R_max_observed: Optional[float] = None
 
-    # ── Posterior covariance ──────────────────────────────────────────────────
+    # ── Hiệp phương sai posterior ────────────────────────────────────────────
     P_mean: Optional[float] = None
     P_max: Optional[float] = None
 
-    # ── ADR-003 pass / fail flags ─────────────────────────────────────────────
+    # ── Cờ pass / fail theo ADR-003 ─────────────────────────────────────────
     pass_variance_reduction: Optional[bool] = None
     pass_rmse_guardrail: Optional[bool] = None
     pass_mae_guardrail: Optional[bool] = None
 
-    # ── Derived properties ────────────────────────────────────────────────────
+    # ── Thuộc tính suy ra ───────────────────────────────────────────────────
 
     @property
     def cycle_success_rate(self) -> Optional[float]:
-        """Fraction of cycles that completed normally (n_valid / n_samples)."""
+        """Tỷ lệ cycle hoàn tất bình thường (n_valid / n_samples)."""
         if self.n_samples == 0:
             return None
         return self.n_valid / self.n_samples
 
     @property
     def sample_loss_rate(self) -> Optional[float]:
-        """Fraction of samples lost to skips or errors."""
+        """Tỷ lệ sample mất do bị skip hoặc lỗi."""
         if self.n_samples == 0:
             return None
         return (self.n_skipped + self.n_error) / self.n_samples
 
     @property
     def passes_acceptance_gate(self) -> bool:
-        """True iff all three ADR-003 acceptance criteria pass."""
+        """True khi cả ba tiêu chí chấp nhận ADR-003 đều pass."""
         return bool(
             self.pass_variance_reduction
             and self.pass_rmse_guardrail
@@ -111,17 +111,17 @@ class SliceMetrics:
         )
 
 
-# ── Computation ────────────────────────────────────────────────────────────────
+# ── Tính toán ────────────────────────────────────────────────────────────────
 
 
 def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
-    """Compute all evaluation metrics from a sequence of cycle-row dicts.
+    """Tính toàn bộ metric đánh giá từ chuỗi dict của các dòng cycle.
 
     Parameters
     ----------
     rows:
-        Dicts produced by ``PipelineCycle.objects.values(...)``.
-        Expected keys (all optional / nullable):
+        Dict sinh bởi ``PipelineCycle.objects.values(...)``.
+        Các key kỳ vọng, đều có thể optional / nullable:
         ``raw_soil_moisture``, ``arx_predicted``, ``kf_x_prior``,
         ``kf_P_prior``, ``kf_innovation``, ``kf_R``, ``kf_K``,
         ``kf_x_posterior``, ``kf_P_posterior``,
@@ -131,17 +131,17 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
     -------
     SliceMetrics
         Immutable dataclass with every computed metric.  Fields are ``None``
-        when there is insufficient data (e.g. no ARX predictions available).
+        Dataclass bất biến chứa toàn bộ metric đã tính. Field là ``None`` khi
+        dữ liệu không đủ, ví dụ không có dự đoán ARX.
 
-    Notes
-    -----
-    * All scalar aggregations (latency, innovation, R, P) use
-      :func:`_finite_values`, which discards ``None``, ``NaN``, and ``Inf``
-      before building numpy arrays.
-    * Variance reduction is computed on **paired** rows — only rows where
-      *both* ``raw_soil_moisture`` and ``kf_x_posterior`` are finite are
-      included.  This guarantees the two ``np.diff`` sequences share the same
-      sample index, so the ratio is meaningful for the ADR-003 acceptance gate.
+    Ghi chú
+    -------
+    * Mọi phép tổng hợp scalar (latency, innovation, R, P) dùng
+      :func:`_finite_values`, loại ``None``, ``NaN`` và ``Inf`` trước khi tạo
+      numpy array.
+    * Variance reduction được tính trên các dòng **paired**: chỉ lấy dòng mà cả
+      ``raw_soil_moisture`` và ``kf_x_posterior`` đều hữu hạn. Như vậy hai chuỗi
+      ``np.diff`` dùng cùng index sample, tỷ lệ mới có ý nghĩa cho gate ADR-003.
     """
     if not rows:
         return SliceMetrics()
@@ -153,12 +153,12 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
     )
     n_error = sum(1 for r in rows if r.get("cycle_status") == "error")
 
-    # ── Adaptive status distribution ──────────────────────────────────────────
+    # ── Phân bố trạng thái adaptive ─────────────────────────────────────────
     n_r_updated = sum(1 for r in rows if r.get("adaptive_status") == "R_updated")
     n_r_skipped = sum(1 for r in rows if r.get("adaptive_status") == "R_skipped")
     n_adaptive_skipped = sum(1 for r in rows if r.get("adaptive_status") == "skipped")
 
-    # ── Latency ───────────────────────────────────────────────────────────────
+    # ── Độ trễ ──────────────────────────────────────────────────────────────
     lat_arr = _finite_values(rows, "latency_ms")
     if len(lat_arr) > 0:
         latency_mean_ms = float(np.mean(lat_arr))
@@ -166,7 +166,7 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
     else:
         latency_mean_ms = latency_p95_ms = None
 
-    # ── Accuracy metrics (ok cycles with reference available) ─────────────────
+    # ── Metric độ chính xác, chỉ tính cycle ok có reference ─────────────────
     ok_rows = [r for r in rows if r.get("cycle_status") == "ok"]
 
     arx_refs, arx_preds = _paired_values(ok_rows, "raw_soil_moisture", "arx_predicted")
@@ -183,10 +183,10 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
     else:
         rmse_filtered = mae_filtered = None
 
-    # ── Variance reduction ────────────────────────────────────────────────────
-    # Use _paired_values so raw_vals[i] and filt_vals[i] always correspond to
-    # the SAME row.  Non-finite values in either column cause the row to be
-    # dropped from both arrays, keeping the diff sequences aligned.
+    # ── Mức giảm phương sai ──────────────────────────────────────────────────
+    # Dùng _paired_values để raw_vals[i] và filt_vals[i] luôn cùng một dòng.
+    # Nếu một trong hai cột không hữu hạn thì bỏ dòng đó khỏi cả hai array, nhờ
+    # vậy hai chuỗi diff vẫn căn đúng với nhau.
     raw_vals, filt_vals = _paired_values(rows, "raw_soil_moisture", "kf_x_posterior")
 
     var_diff_raw = float(np.var(np.diff(raw_vals))) if len(raw_vals) >= 2 else None
@@ -197,7 +197,7 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
     else:
         variance_reduction = None
 
-    # ── Guardrail ratios ──────────────────────────────────────────────────────
+    # ── Tỷ lệ guardrail ─────────────────────────────────────────────────────
     rmse_ratio = (
         rmse_filtered / rmse_arx
         if (rmse_filtered is not None and rmse_arx is not None and rmse_arx > 0)
@@ -209,7 +209,7 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
         else None
     )
 
-    # ── Innovation diagnostics ────────────────────────────────────────────────
+    # ── Chẩn đoán innovation ───────────────────────────────────────────────
     innovations = _finite_values(rows, "kf_innovation")
     if len(innovations) > 0:
         innovation_mean = float(np.mean(innovations))
@@ -218,7 +218,7 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
     else:
         innovation_mean = innovation_std = innovation_max_abs = None
 
-    # ── Adaptive R diagnostics ────────────────────────────────────────────────
+    # ── Chẩn đoán R thích nghi ─────────────────────────────────────────────
     r_vals = _finite_values(rows, "kf_R")
     if len(r_vals) > 0:
         R_mean = float(np.mean(r_vals))
@@ -227,7 +227,7 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
     else:
         R_mean = R_min_observed = R_max_observed = None
 
-    # ── Posterior covariance ──────────────────────────────────────────────────
+    # ── Hiệp phương sai posterior ───────────────────────────────────────────
     p_vals = _finite_values(rows, "kf_P_posterior")
     if len(p_vals) > 0:
         P_mean = float(np.mean(p_vals))
@@ -235,7 +235,7 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
     else:
         P_mean = P_max = None
 
-    # ── ADR-003 pass / fail ───────────────────────────────────────────────────
+    # ── Pass / fail theo ADR-003 ────────────────────────────────────────────
     pass_variance_reduction = (
         variance_reduction >= VARIANCE_REDUCTION_MIN
         if variance_reduction is not None
@@ -281,14 +281,14 @@ def compute_metrics(rows: Sequence[dict]) -> SliceMetrics:
     )
 
 
-# ── Private helpers ────────────────────────────────────────────────────────────
+# ── Helper nội bộ ─────────────────────────────────────────────────────────────
 
 
 def _finite_values(rows: Sequence[dict], field: str) -> np.ndarray:
-    """Return a 1-D float array containing only finite values for *field*.
+    """Trả về array float 1-D chỉ gồm giá trị hữu hạn của *field*.
 
-    Rows where the field is ``None``, ``NaN``, or ``Inf`` are silently dropped.
-    Non-numeric values that cannot be cast to ``float`` are also dropped.
+    Dòng có field là ``None``, ``NaN`` hoặc ``Inf`` sẽ bị bỏ qua. Giá trị không
+    phải số và không ép được sang ``float`` cũng bị bỏ qua.
     """
     out: list[float] = []
     for r in rows:
@@ -309,11 +309,11 @@ def _paired_values(
     ref_key: str,
     pred_key: str,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return parallel arrays for pairs where BOTH values are non-None finite floats.
+    """Trả về hai array song song khi CẢ HAI giá trị đều là float hữu hạn.
 
-    Rows where either column is ``None``, ``NaN``, ``Inf``, or non-numeric are
-    dropped from *both* output arrays.  The two returned arrays are therefore
-    guaranteed to be the same length and to share the same row indices.
+    Dòng mà một trong hai cột là ``None``, ``NaN``, ``Inf`` hoặc không phải số
+    sẽ bị bỏ khỏi *cả hai* array. Vì vậy hai array trả về luôn cùng độ dài và
+    dùng cùng index dòng.
     """
     refs, preds = [], []
     for r in rows:

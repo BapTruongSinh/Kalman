@@ -1,7 +1,7 @@
 """
-DB integration, evaluation summary persistence, and report export.
+Tích hợp DB, lưu summary đánh giá và export báo cáo.
 
-Public surface
+Các hàm public
 --------------
 evaluate_slice(run_pk, slice_type)  → EvaluationSummary
 evaluate_all_slices(run_pk)          → dict[str, EvaluationSummary]
@@ -27,7 +27,7 @@ from estimation.evaluation.metrics import (
 )
 from estimation.models import EvaluationSummary, ExperimentRun, PipelineCycle
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+# ── Hằng số ──────────────────────────────────────────────────────────────────
 _ALL_SLICES = ("train", "validation", "test")
 _CYCLE_VALUE_FIELDS = (
     "raw_soil_moisture",
@@ -45,28 +45,27 @@ _CYCLE_VALUE_FIELDS = (
 )
 
 
-# ── Core evaluation ────────────────────────────────────────────────────────────
+# ── Đánh giá chính ───────────────────────────────────────────────────────────
 
 
 def evaluate_slice(run_pk: int, slice_type: str) -> EvaluationSummary:
-    """Compute metrics for *slice_type*, persist as ``EvaluationSummary``, and return it.
+    """Tính metric cho *slice_type*, lưu vào ``EvaluationSummary`` rồi trả về.
 
-    Idempotent — updates the existing row if one already exists for
-    ``(run, slice_type)``.
+    Hàm idempotent: nếu đã có dòng cho ``(run, slice_type)`` thì update dòng đó.
 
     Parameters
     ----------
     run_pk:
-        Primary key of the target ``ExperimentRun``.
+        Primary key của ``ExperimentRun`` cần đánh giá.
     slice_type:
-        One of ``"train"``, ``"validation"``, ``"test"``.
+        Một trong ``"train"``, ``"validation"``, ``"test"``.
 
     Raises
     ------
     ValueError
-        If *slice_type* is not one of the allowed values.
+        Nếu *slice_type* không thuộc danh sách hợp lệ.
     ExperimentRun.DoesNotExist
-        If no run with *run_pk* exists.
+        Nếu không có run với *run_pk*.
     """
     if slice_type not in _ALL_SLICES:
         raise ValueError(
@@ -90,27 +89,26 @@ def evaluate_slice(run_pk: int, slice_type: str) -> EvaluationSummary:
 
 
 def evaluate_all_slices(run_pk: int) -> dict[str, EvaluationSummary]:
-    """Evaluate and persist metrics for all three data slices of a run.
+    """Đánh giá và lưu metric cho cả ba slice dữ liệu của một run.
 
-    Returns a dict keyed by ``"train"``, ``"validation"``, ``"test"``.
+    Trả về dict có key ``"train"``, ``"validation"``, ``"test"``.
     """
     return {s: evaluate_slice(run_pk, s) for s in _ALL_SLICES}
 
 
-# ── Text report ────────────────────────────────────────────────────────────────
+# ── Báo cáo text ─────────────────────────────────────────────────────────────
 
 
 def build_text_report(run_pk: int) -> str:
-    """Build a human-readable evaluation report for all slices of *run_pk*.
+    """Tạo báo cáo đánh giá dễ đọc cho mọi slice của *run_pk*.
 
-    Queries ``EvaluationSummary`` rows (creating them if absent), then
-    formats a structured text report suitable for inclusion in a final
-    academic presentation or lab notebook.
+    Query các dòng ``EvaluationSummary`` (tạo nếu chưa có), sau đó format thành
+    báo cáo text có cấu trúc để đưa vào slide học thuật hoặc lab notebook.
 
     Returns
     -------
     str
-        Multi-line formatted report.
+        Báo cáo nhiều dòng đã format.
     """
     summaries = {s: evaluate_slice(run_pk, s) for s in _ALL_SLICES}
     run = ExperimentRun.objects.get(pk=run_pk)
@@ -149,13 +147,13 @@ def build_text_report(run_pk: int) -> str:
 
     slices = list(_ALL_SLICES)
 
-    # ── Header ─────────────────────────────────────────────────────────────
+    # ── Phần đầu báo cáo ──────────────────────────────────────────────────
     hdr(f"EVALUATION REPORT — Run #{run_pk}  ({run.created_at:%Y-%m-%d %H:%M UTC})")
     lines.append(f"  Status : {run.status}")
     lines.append(f"  Name   : {run.name or '(none)'}")
     lines.append("")
 
-    # ── Column header ──────────────────────────────────────────────────────
+    # ── Header cột ────────────────────────────────────────────────────────
     row("Metric", "Train", "Validation", "Test", width=26)
     rule()
 
@@ -259,7 +257,7 @@ def build_text_report(run_pk: int) -> str:
     row("P mean", *[fmt(s.P_mean) for s in summaries.values()], width=26)
     row("P max", *[fmt(s.P_max) for s in summaries.values()], width=26)
 
-    # ── ADR-003 gate (test slice only) ─────────────────────────────────────
+    # ── Gate ADR-003, chỉ xét test slice ─────────────────────────────────
     test = summaries["test"]
     section("ADR-003 ACCEPTANCE GATE  (Test slice)")
     lines.append(
@@ -279,7 +277,7 @@ def build_text_report(run_pk: int) -> str:
     gate_label = "PASS ✓" if _gate is True else ("FAIL ✗" if _gate is False else "N/A (flags incomplete)")
     lines.append(f"  Overall ADR-003 gate:  {gate_label}")
 
-    # ── AMPC readiness placeholder ─────────────────────────────────────────
+    # ── Placeholder mức sẵn sàng cho AMPC ─────────────────────────────────
     section("AMPC READINESS (v1 — placeholder)")
     lines.append(
         textwrap.fill(
@@ -307,19 +305,18 @@ def build_text_report(run_pk: int) -> str:
     return "\n".join(lines)
 
 
-# ── CSV export ─────────────────────────────────────────────────────────────────
+# ── Export CSV ───────────────────────────────────────────────────────────────
 
 
 def export_to_csv(run_pk: int, output_path: "Path | str") -> Path:
-    """Export evaluation metrics for all slices of *run_pk* to a CSV file.
+    """Export metric đánh giá của mọi slice thuộc *run_pk* ra file CSV.
 
-    Each slice becomes one row.  The file is created (or overwritten) at
-    *output_path*.
+    Mỗi slice là một dòng. File được tạo mới hoặc ghi đè tại *output_path*.
 
     Returns
     -------
     Path
-        Path of the written file.
+        Đường dẫn file đã ghi.
     """
     summaries = {s: evaluate_slice(run_pk, s) for s in _ALL_SLICES}
     output = Path(output_path)
@@ -408,30 +405,29 @@ def export_to_csv(run_pk: int, output_path: "Path | str") -> Path:
     return output
 
 
-# ── Plot export ────────────────────────────────────────────────────────────────
+# ── Export biểu đồ ───────────────────────────────────────────────────────────
 
 
 def export_plots(run_pk: int, output_dir: "Path | str") -> list[Path]:
-    """Generate diagnostic plots for all slices of *run_pk*.
+    """Sinh biểu đồ chẩn đoán cho mọi slice của *run_pk*.
 
-    Produces up to four plots per slice:
-    1. ``time_series_{slice}.png``  — raw / ARX predicted / Kalman filtered
-    2. ``innovation_{slice}.png``   — innovation sequence
-    3. ``adaptive_R_{slice}.png``   — adaptive measurement noise R
-    4. ``residuals_{slice}.png``    — histogram of (raw − filtered) residuals
-       (only written when at least one paired raw/filtered value is present)
+    Sinh tối đa bốn biểu đồ cho mỗi slice:
+    1. ``time_series_{slice}.png``: raw / ARX predicted / Kalman filtered
+    2. ``innovation_{slice}.png``: chuỗi innovation
+    3. ``adaptive_R_{slice}.png``: nhiễu đo lường thích nghi R
+    4. ``residuals_{slice}.png``: histogram của phần dư (raw − filtered), chỉ
+       ghi khi có ít nhất một cặp raw/filtered hợp lệ.
 
-    Requires ``matplotlib`` to be importable with the current numpy ABI.
-    Returns an empty list (with a warning) if matplotlib is unavailable.
+    Cần import được ``matplotlib`` với ABI numpy hiện tại. Nếu không có
+    matplotlib thì trả list rỗng và warning.
 
     Returns
     -------
     list[Path]
-        Paths of the generated PNG files.
+        Đường dẫn các file PNG đã sinh.
     """
-    # Lazy import — only this function touches matplotlib so the ABI
-    # traceback (if any) never appears when calling evaluate_slice or
-    # build_text_report.
+    # Import lazy: chỉ hàm này đụng tới matplotlib, nên traceback ABI (nếu có)
+    # không xuất hiện khi gọi evaluate_slice hoặc build_text_report.
     try:
         import matplotlib  # noqa: PLC0415
 
@@ -477,7 +473,7 @@ def export_plots(run_pk: int, output_dir: "Path | str") -> list[Path]:
         inn = [r.get("kf_innovation") for r in rows]
         R_val = [r.get("kf_R") for r in rows]
 
-        # 1. Time-series ───────────────────────────────────────────────────────
+        # 1. Chuỗi thời gian ──────────────────────────────────────────────────
         fig, ax = plt.subplots(figsize=(14, 4))
         ax.plot(ts, raw, lw=0.6, color="steelblue", alpha=0.7, label="Raw")
         ax.plot(ts, arx, lw=0.8, color="orange", alpha=0.8, label="ARX predicted")
@@ -493,7 +489,7 @@ def export_plots(run_pk: int, output_dir: "Path | str") -> list[Path]:
         plt.close(fig)
         generated.append(path)
 
-        # 2. Innovation ────────────────────────────────────────────────────────
+        # 2. Innovation ───────────────────────────────────────────────────────
         fig, ax = plt.subplots(figsize=(14, 3))
         ax.plot(ts, inn, lw=0.7, color="seagreen", label="Innovation e_k")
         ax.axhline(0, color="black", lw=0.5, ls="--")
@@ -507,7 +503,7 @@ def export_plots(run_pk: int, output_dir: "Path | str") -> list[Path]:
         plt.close(fig)
         generated.append(path)
 
-        # 3. Adaptive R ────────────────────────────────────────────────────────
+        # 3. R thích nghi ─────────────────────────────────────────────────────
         fig, ax = plt.subplots(figsize=(14, 3))
         ax.plot(ts, R_val, lw=0.8, color="darkorchid", label="Adaptive R_k")
         ax.set_title(f"Adaptive R — {slice_type.capitalize()} slice  (Run #{run_pk})")
@@ -520,7 +516,7 @@ def export_plots(run_pk: int, output_dir: "Path | str") -> list[Path]:
         plt.close(fig)
         generated.append(path)
 
-        # 4. Residuals histogram ───────────────────────────────────────────────
+        # 4. Histogram phần dư ────────────────────────────────────────────────
         residuals = [
             r - k
             for r, k in zip(raw, kf)
@@ -544,11 +540,11 @@ def export_plots(run_pk: int, output_dir: "Path | str") -> list[Path]:
     return generated
 
 
-# ── Internal helpers ───────────────────────────────────────────────────────────
+# ── Helper nội bộ ────────────────────────────────────────────────────────────
 
 
 def _metrics_to_defaults(m: SliceMetrics) -> dict:
-    """Map a ``SliceMetrics`` instance to an ``EvaluationSummary`` defaults dict."""
+    """Map một ``SliceMetrics`` sang dict defaults của ``EvaluationSummary``."""
     return {
         "n_samples": m.n_samples,
         "n_valid": m.n_valid,

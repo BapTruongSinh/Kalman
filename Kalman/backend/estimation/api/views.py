@@ -1,22 +1,22 @@
-"""REST API views for the dashboard.
+"""Các REST API view cho dashboard.
 
-Endpoints
----------
+Endpoint
+--------
 GET /api/runs/
-    List the 50 most recent experiment runs.
+    Liệt kê 50 experiment run mới nhất.
 
 GET /api/runs/{run_id}/series/
-    Return PipelineCycle time-series data for a run.
+    Trả dữ liệu time-series PipelineCycle của một run.
 
     Query params:
-        slice  -- optional; if present must be ``train``, ``validation``, or ``test``.
-                  Omit for all slices.
-        limit  -- max rows returned (default 2 000, max 10 000; must be >= 1)
-        stride -- sample every Nth cycle (default 1; max 1 000). ``limit * stride``
-                  must not exceed 100 000 (DoS guard).
+        slice  -- tùy chọn; nếu có thì phải là ``train``, ``validation`` hoặc
+                  ``test``. Bỏ qua param này để lấy mọi slice.
+        limit  -- số dòng tối đa trả về (mặc định 2 000, tối đa 10 000; >= 1)
+        stride -- lấy mẫu mỗi N cycle (mặc định 1, tối đa 1 000).
+                  ``limit * stride`` không được vượt 100 000 để tránh DoS.
 
 GET /api/runs/{run_id}/metrics/
-    Return EvaluationSummary metrics for each data slice of a run.
+    Trả metric EvaluationSummary cho từng slice dữ liệu của một run.
 """
 
 from django.http import Http404
@@ -37,14 +37,14 @@ _VALID_SLICES = frozenset({"train", "validation", "test"})
 _DEFAULT_LIMIT = 2_000
 _MAX_LIMIT = 10_000
 _MAX_STRIDE = 1_000
-# Cap rows considered when stride > 1 (prevents limit * stride scans up to 10M IDs).
+# Chặn số dòng xét khi stride > 1, tránh quét limit * stride lên tới hàng triệu ID.
 _MAX_LIMIT_STRIDE_PRODUCT = 100_000
 
 
 def _parse_positive_int(raw: str, default: int, max_value: int) -> tuple[int, str | None]:
-    """Parse *raw* as a positive integer clamped to [1, max_value].
+    """Parse *raw* thành số nguyên dương và chặn trong [1, max_value].
 
-    Returns ``(value, None)`` on success, or ``(0, error_message)`` on failure.
+    Thành công thì trả ``(value, None)``, lỗi thì trả ``(0, error_message)``.
     """
     try:
         value = int(raw)
@@ -56,7 +56,7 @@ def _parse_positive_int(raw: str, default: int, max_value: int) -> tuple[int, st
 
 
 class RunListView(APIView):
-    """List the 50 most recent experiment runs."""
+    """Liệt kê 50 experiment run mới nhất."""
 
     def get(self, request: Request) -> Response:
         runs = ExperimentRun.objects.order_by("-created_at")[:50]
@@ -64,7 +64,7 @@ class RunListView(APIView):
 
 
 class RunSeriesView(APIView):
-    """Return PipelineCycle rows for charting."""
+    """Trả các dòng PipelineCycle để vẽ biểu đồ."""
 
     def get(self, request: Request, run_id: int) -> Response:
         try:
@@ -72,7 +72,7 @@ class RunSeriesView(APIView):
         except ExperimentRun.DoesNotExist:
             raise Http404
 
-        # -- Parse and validate query params ----------------------------------
+        # -- Parse và validate query param ------------------------------------
         raw_limit = request.query_params.get("limit", str(_DEFAULT_LIMIT))
         limit, limit_err = _parse_positive_int(raw_limit, _DEFAULT_LIMIT, _MAX_LIMIT)
         if limit_err:
@@ -111,19 +111,19 @@ class RunSeriesView(APIView):
         else:
             slice_type = None
 
-        # -- Build queryset ---------------------------------------------------
+        # -- Tạo queryset -----------------------------------------------------
         qs = PipelineCycle.objects.filter(run=run).order_by("cycle_index")
         if slice_type is not None:
             qs = qs.filter(slice_type=slice_type)
 
         total = qs.count()
 
-        # -- Apply stride + limit ---------------------------------------------
+        # -- Áp dụng stride + limit ------------------------------------------
         if stride == 1:
             result_qs = qs[:limit]
         else:
-            # Bound the ID scan to at most (limit * stride) rows so that a
-            # large run does not pull every cycle ID into Python memory.
+            # Giới hạn scan ID tối đa (limit * stride) dòng, để run lớn không
+            # kéo toàn bộ cycle ID vào bộ nhớ Python.
             candidate_ids = list(
                 qs.values_list("id", flat=True)[: limit * stride]
             )
@@ -145,7 +145,7 @@ class RunSeriesView(APIView):
 
 
 class RunMetricsView(APIView):
-    """Return EvaluationSummary metrics per data slice."""
+    """Trả metric EvaluationSummary theo từng slice dữ liệu."""
 
     def get(self, request: Request, run_id: int) -> Response:
         try:

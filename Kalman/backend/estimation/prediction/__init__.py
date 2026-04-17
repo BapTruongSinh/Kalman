@@ -1,13 +1,13 @@
 """
-``estimation.prediction`` — prediction adapter contract and ARX baseline.
+``estimation.prediction``: hợp đồng prediction adapter và baseline ARX.
 
 Public API
 ----------
-``PredictionInput``        — input window passed to ``predict()``
-``PredictionResult``       — typed result returned by ``predict()``
-``PredictionAdapter``      — abstract base class for all prediction models
-``ARXTrainConfig``         — hyperparameters for offline ARX training
-``ARXPredictionAdapter``   — ARX (OLS) implementation of ``PredictionAdapter``
+``PredictionInput``        — cửa sổ input truyền vào ``predict()``
+``PredictionResult``       — kết quả có kiểu trả về từ ``predict()``
+``PredictionAdapter``      — abstract base class cho mọi model dự đoán
+``ARXTrainConfig``         — siêu tham số để train ARX offline
+``ARXPredictionAdapter``   — triển khai ARX (OLS) của ``PredictionAdapter``
 """
 
 from .arx_adapter import ARXPredictionAdapter, ARXTrainConfig

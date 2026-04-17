@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Django management entry point for the Kalman pipeline backend."""
+"""Entry point quản lý Django cho backend Kalman pipeline."""
 
 import os
 import sys

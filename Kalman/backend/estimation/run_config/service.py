@@ -1,21 +1,20 @@
 """
-RunConfig service — persistence and lifecycle management.
+Service của RunConfig: ghi DB và quản lý vòng đời cấu hình.
 
-Responsibilities
-----------------
-1. ``create_run``  — atomically write ``ExperimentRun`` + ``ExperimentConfig``
-   from a ``RunConfig``.
-2. ``load_config`` — reconstruct a ``RunConfig`` from an existing run id.
-3. ``update_config`` — replace the config of a *pending* run; raises
-   ``ConfigFrozenError`` once the run has started.
+Trách nhiệm
+-----------
+1. ``create_run``: ghi ``ExperimentRun`` + ``ExperimentConfig`` từ
+   ``RunConfig`` trong một transaction.
+2. ``load_config``: dựng lại ``RunConfig`` từ run id đã có.
+3. ``update_config``: thay config của một run còn *pending*; khi run đã bắt đầu
+   thì raise ``ConfigFrozenError``.
 
-v1 authorization model
------------------------
-Configuration changes are blocked once ``ExperimentRun.status`` is no longer
-``"pending"``.  This is a hard service-layer invariant; there is no role-based
-auth mechanism in v1.  The restriction is documented in ``config.py`` and
-enforced here so Task #007 / any caller that tries to mutate a live run
-receives a clear error rather than a silent overwrite.
+Mô hình quyền ở v1
+------------------
+Không cho đổi cấu hình khi ``ExperimentRun.status`` không còn ``"pending"``.
+Đây là invariant cứng của tầng service; v1 chưa có cơ chế phân quyền theo role.
+Ràng buộc được ghi ở ``config.py`` và enforce tại đây để Task #007 hoặc caller
+nào cố mutate run đang chạy sẽ nhận lỗi rõ ràng thay vì ghi đè âm thầm.
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ from .config import ConfigFrozenError, RunConfig
 logger = logging.getLogger(__name__)
 
 
-# ── Public API ─────────────────────────────────────────────────────────────────
+# ── Public API ────────────────────────────────────────────────────────────────
 
 
 def create_run(
@@ -40,28 +39,28 @@ def create_run(
     notes: str | None = None,
     owner=None,
 ) -> ExperimentRun:
-    """Atomically create an ``ExperimentRun`` + its ``ExperimentConfig`` snapshot.
+    """Tạo ``ExperimentRun`` và snapshot ``ExperimentConfig`` trong một transaction.
 
-    The ``ExperimentConfig`` row captures the exact parameter values so the run
-    can be reproduced later.  ``raw_config_json`` stores the full JSON snapshot
-    for forward-compatibility.
+    Dòng ``ExperimentConfig`` lưu đúng giá trị tham số để sau này có thể tái
+    lập run. ``raw_config_json`` lưu snapshot JSON đầy đủ để dễ tương thích khi
+    schema phát triển.
 
     Parameters
     ----------
     config:
-        Validated ``RunConfig`` instance.
+        Instance ``RunConfig`` đã validate.
     run_type:
-        ``ExperimentRun.RunType`` choice string; defaults to ``"offline_replay"``.
+        Choice string của ``ExperimentRun.RunType``; mặc định ``"offline_replay"``.
     notes:
-        Optional free-text annotation stored on the run row.
+        Ghi chú dạng text tùy chọn lưu trên dòng run.
     owner:
-        User who may POST live samples for this run (``ExperimentRun.owner``).
-        Ignored for offline replays unless callers choose to set it.
+        User được phép POST sample live cho run này (``ExperimentRun.owner``).
+        Với offline replay thì thường bỏ qua, trừ khi caller muốn set.
 
     Returns
     -------
     ExperimentRun
-        The newly created (``status="pending"``) run row.
+        Dòng run mới tạo, có ``status="pending"``.
     """
     with transaction.atomic():
         run = ExperimentRun.objects.create(
@@ -95,43 +94,43 @@ def create_run(
 
 
 def load_config(run_id: int) -> RunConfig:
-    """Load and return the ``RunConfig`` for the given run id.
+    """Load và trả về ``RunConfig`` cho run id được truyền vào.
 
     Raises
     ------
     ExperimentRun.DoesNotExist
-        If no run with ``pk=run_id`` exists.
+        Nếu không có run với ``pk=run_id``.
     ExperimentConfig.DoesNotExist
-        If the run exists but has no associated config row.
+        Nếu run tồn tại nhưng chưa có dòng config tương ứng.
     """
     db_cfg = ExperimentConfig.objects.select_related("run").get(run_id=run_id)
     return RunConfig.from_experiment_config(db_cfg)
 
 
 def update_config(run_id: int, config: RunConfig) -> ExperimentConfig:
-    """Replace the configuration of a *pending* run.
+    """Thay cấu hình của một run còn *pending*.
 
-    The ``ExperimentConfig`` row is overwritten and ``raw_config_json`` is
-    refreshed.  Only runs with ``status="pending"`` may be updated.
+    Dòng ``ExperimentConfig`` được ghi đè và ``raw_config_json`` được refresh.
+    Chỉ run có ``status="pending"`` mới được cập nhật.
 
     Parameters
     ----------
     run_id:
-        Primary key of the target ``ExperimentRun``.
+        Primary key của ``ExperimentRun`` cần cập nhật.
     config:
-        New ``RunConfig`` to persist.
+        ``RunConfig`` mới cần lưu.
 
     Returns
     -------
     ExperimentConfig
-        The updated row.
+        Dòng config đã cập nhật.
 
     Raises
     ------
     ConfigFrozenError
-        If the run status is not ``"pending"``.
+        Nếu trạng thái run không phải ``"pending"``.
     ExperimentRun.DoesNotExist
-        If no run with ``pk=run_id`` exists.
+        Nếu không có run với ``pk=run_id``.
     """
     with transaction.atomic():
         run = ExperimentRun.objects.select_for_update().get(pk=run_id)
@@ -159,7 +158,7 @@ def update_config(run_id: int, config: RunConfig) -> ExperimentConfig:
         db_cfg.raw_config_json = config.to_json()
         db_cfg.save()
 
-        # Keep run name / dataset_source in sync.
+        # Giữ name / dataset_source của run đồng bộ với config.
         if run.name != config.name or run.dataset_source != (config.dataset_source or None):
             run.name = config.name
             run.dataset_source = config.dataset_source or None

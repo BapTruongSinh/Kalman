@@ -1,17 +1,17 @@
 """
-estimation.evaluation — Evaluation metrics and report export.
+estimation.evaluation: metric đánh giá và export báo cáo.
 
-Pure metric layer (no Django required)
----------------------------------------
+Tầng metric thuần, không cần Django
+-----------------------------------
     from estimation.evaluation.metrics import compute_metrics, SliceMetrics
 
-DB integration and export (requires Django settings)
-------------------------------------------------------
+Tích hợp DB và export, cần Django settings
+------------------------------------------
     from estimation.evaluation import evaluate_slice, evaluate_all_slices
     from estimation.evaluation import build_text_report, export_to_csv, export_plots
 
-Threshold constants (importable without Django)
-------------------------------------------------
+Hằng số ngưỡng, import được mà không cần Django
+-----------------------------------------------
     VARIANCE_REDUCTION_MIN  0.20  (ADR-003)
     RMSE_RATIO_MAX          1.05  (ADR-003)
     MAE_RATIO_MAX           1.05  (ADR-003)
@@ -24,8 +24,8 @@ from estimation.evaluation.metrics import (
     compute_metrics,
 )
 
-# DB-backed functions are loaded on first attribute access so that importing
-# SliceMetrics / compute_metrics works without Django settings configured.
+# Các hàm cần DB được load lazy khi truy cập attribute lần đầu, để import
+# SliceMetrics / compute_metrics vẫn chạy được khi chưa cấu hình Django settings.
 _REPORTER_ATTRS = frozenset(
     {
         "evaluate_slice",
@@ -46,17 +46,17 @@ def __getattr__(name: str):  # noqa: ANN001
 
 
 __all__ = [
-    # Pure metrics
+    # Metric thuần
     "SliceMetrics",
     "compute_metrics",
-    # Thresholds
+    # Ngưỡng
     "VARIANCE_REDUCTION_MIN",
     "RMSE_RATIO_MAX",
     "MAE_RATIO_MAX",
-    # DB integration (lazy)
+    # Tích hợp DB, load lazy
     "evaluate_slice",
     "evaluate_all_slices",
-    # Export (lazy)
+    # Export, load lazy
     "build_text_report",
     "export_to_csv",
     "export_plots",

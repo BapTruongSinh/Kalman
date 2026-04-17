@@ -1,12 +1,12 @@
 """
-Serializers for the live sensor ingestion endpoint (Task #010).
+Serializer cho endpoint nạp dữ liệu sensor live (Task #010).
 
-LiveSampleSerializer  — validates a single device reading POSTed to
+LiveSampleSerializer  — validate một sample thiết bị POST lên
     ``POST /api/ingest/samples/``.
 
-LiveIngestResponseSerializer — documents the 201 response shape.
-    (Used for documentation / test assertions; responses are built manually
-    in the view to avoid a second serialization pass.)
+LiveIngestResponseSerializer — mô tả shape response 201.
+    (Dùng cho tài liệu / test assertion; view tự build response dict để tránh
+    serialize lần thứ hai.)
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import math
 
 from rest_framework import serializers
 
-# Sensor channel names that need non-finite guard.
+# Tên các kênh sensor cần chặn giá trị không hữu hạn.
 _SENSOR_CHANNELS = (
     "soil_moisture",
     "temperature",
@@ -28,7 +28,7 @@ _SENSOR_CHANNELS = (
 
 
 def _validate_finite_or_null(value: float | None, field_name: str) -> float | None:
-    """Return *value* unchanged, or raise ValidationError for NaN / Inf."""
+    """Trả lại *value* nếu hợp lệ, hoặc raise ValidationError nếu là NaN / Inf."""
     if value is None:
         return None
     if not math.isfinite(value):
@@ -39,25 +39,25 @@ def _validate_finite_or_null(value: float | None, field_name: str) -> float | No
 
 
 class LiveSampleSerializer(serializers.Serializer):
-    """Validate a single live sensor reading from a device.
+    """Validate một sample sensor live từ thiết bị.
 
-    Required fields
-    ---------------
+    Field bắt buộc
+    --------------
     run_id:
-        Primary key of a live :class:`~estimation.models.ExperimentRun`
-        whose ``status`` is ``"running"``.
+        Primary key của live :class:`~estimation.models.ExperimentRun` có
+        ``status`` là ``"running"``.
     timestamp:
-        ISO-8601 timestamp from the device (UTC recommended; naive timestamps
-        are treated as UTC).
+        Timestamp ISO-8601 từ thiết bị. Nên dùng UTC; timestamp naïve được xem
+        là UTC.
 
-    Optional sensor channels
-    ------------------------
-    All sensor channels accept ``null`` — the Kalman filter will skip the
-    measurement-update step when ``soil_moisture`` is absent or invalid.
+    Kênh sensor tùy chọn
+    --------------------
+    Mọi kênh sensor đều nhận ``null``. Bộ lọc Kalman sẽ bỏ qua bước cập nhật đo
+    lường khi ``soil_moisture`` vắng mặt hoặc không hợp lệ.
 
-    Non-finite values (NaN, Infinity, -Infinity) are rejected with 400 Bad
-    Request.  MySQL cannot store them and allowing them through would produce a
-    500 at save time.
+    Giá trị không hữu hạn (NaN, Infinity, -Infinity) bị từ chối với 400 Bad
+    Request. MySQL không lưu được các giá trị này; nếu cho lọt qua sẽ gây 500
+    khi save.
     """
 
     run_id = serializers.IntegerField(
@@ -67,14 +67,14 @@ class LiveSampleSerializer(serializers.Serializer):
     timestamp = serializers.DateTimeField(
         help_text="ISO-8601 UTC timestamp from the sensor (e.g. 2026-04-14T12:00:00Z).",
     )
-    # Primary Kalman channel
+    # Kênh chính của Kalman.
     soil_moisture = serializers.FloatField(
         allow_null=True,
         required=False,
         default=None,
         help_text="Soil moisture reading (%). Must be finite or null.",
     )
-    # Ancillary channels (stored for traceability; not used by Kalman directly)
+    # Kênh phụ, lưu để truy vết; Kalman không dùng trực tiếp.
     temperature = serializers.FloatField(allow_null=True, required=False, default=None)
     humidity = serializers.FloatField(allow_null=True, required=False, default=None)
     light = serializers.FloatField(allow_null=True, required=False, default=None)
@@ -82,7 +82,7 @@ class LiveSampleSerializer(serializers.Serializer):
     mist = serializers.FloatField(allow_null=True, required=False, default=None)
     fan = serializers.FloatField(allow_null=True, required=False, default=None)
 
-    # ── Per-field finite guards ────────────────────────────────────────────────
+    # ── Chặn giá trị không hữu hạn theo từng field ──────────────────────────
 
     def validate_soil_moisture(self, value: float | None) -> float | None:
         return _validate_finite_or_null(value, "soil_moisture")
@@ -107,9 +107,9 @@ class LiveSampleSerializer(serializers.Serializer):
 
 
 class LiveIngestResponseSerializer(serializers.Serializer):
-    """Shape of the 201 Created response from ``POST /api/ingest/samples/``.
+    """Shape của response 201 Created từ ``POST /api/ingest/samples/``.
 
-    Used in tests and documentation; the view constructs the dict directly.
+    Dùng trong test và tài liệu; view tự tạo dict trực tiếp.
     """
 
     cycle_index = serializers.IntegerField(

@@ -1,21 +1,20 @@
 """
-RunConfig — the single in-memory configuration object for an experiment run.
+RunConfig là object cấu hình trong bộ nhớ cho một experiment run.
 
-Design
-------
-``RunConfig`` is the canonical source of truth for every tunable parameter.
-It validates all fields at construction time and delegates sub-config creation
-to the existing validated dataclasses (``KalmanConfig``, ``ARXTrainConfig``).
+Thiết kế
+--------
+``RunConfig`` là nguồn sự thật chính cho mọi tham số có thể tune. Nó validate
+tất cả field khi khởi tạo và giao việc tạo sub-config cho các dataclass đã có
+validate sẵn như ``KalmanConfig`` và ``ARXTrainConfig``.
 
-Once a run moves out of ``"pending"`` status the configuration is frozen by the
-service layer (see ``service.py``).  There is no in-process mutation mechanism.
+Khi run không còn trạng thái ``"pending"``, cấu hình bị khóa bởi tầng service
+(xem ``service.py``). Không có cơ chế mutate trực tiếp trong process.
 
-JSON round-trip
----------------
-``RunConfig.to_json()`` / ``RunConfig.from_json()`` are used to populate
-``ExperimentConfig.raw_config_json`` so a saved row is fully self-describing
-and can reproduce the exact configuration without requiring every column to be
-re-read individually.
+Vòng đời JSON
+-------------
+``RunConfig.to_json()`` / ``RunConfig.from_json()`` được dùng để ghi
+``ExperimentConfig.raw_config_json``. Nhờ vậy một dòng đã lưu tự mô tả đầy đủ
+và có thể tái tạo đúng cấu hình mà không cần đọc lại từng cột riêng lẻ.
 """
 
 from __future__ import annotations
@@ -27,12 +26,12 @@ from dataclasses import asdict, dataclass, field
 from ..kalman.cycle import KalmanConfig
 from ..prediction.arx_adapter import ARXTrainConfig, _DEFAULT_INPUT_COLS
 
-# ── v1 authorization guard ─────────────────────────────────────────────────────
+# ── Chốt quyền chỉnh config ở v1 ──────────────────────────────────────────────
 #
-# v1 restriction: configuration changes are blocked once a run is no longer in
-# "pending" status.  This is enforced by the service layer (service.py).
-# There is no role-based auth in v1; the constraint is documented as a
-# hard service-layer invariant here for Task #007 onwards.
+# Ràng buộc v1: không cho đổi cấu hình khi run không còn trạng thái "pending".
+# Điều này được enforce ở tầng service (service.py). v1 chưa có phân quyền theo
+# role; ràng buộc này được ghi lại như một invariant cứng của service từ
+# Task #007 trở đi.
 
 _IMMUTABLE_AFTER_START_NOTE = (
     "RunConfig is immutable after ExperimentRun.status moves out of 'pending'. "
@@ -41,57 +40,56 @@ _IMMUTABLE_AFTER_START_NOTE = (
 
 
 class ConfigFrozenError(RuntimeError):
-    """Raised when an attempt is made to modify a run config after run start."""
+    """Raise khi cố sửa config sau khi run đã bắt đầu."""
 
 
-# ── Constants ─────────────────────────────────────────────────────────────────
+# ── Hằng số ──────────────────────────────────────────────────────────────────
 
 _VALID_PREPROCESS_POLICIES = frozenset({"keep_last", "interpolate", "skip"})
 
 
-# ── RunConfig dataclass ────────────────────────────────────────────────────────
+# ── Dataclass RunConfig ───────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
 class RunConfig:
-    """Frozen configuration snapshot for one estimation run.
+    """Snapshot cấu hình dạng frozen cho một lần chạy ước lượng.
 
-    All defaults match ADR-003 locked decisions (Task #001).
+    Tất cả giá trị mặc định khớp với quyết định đã chốt ở ADR-003 (Task #001).
 
-    The dataclass is frozen so that a ``RunConfig`` object cannot be mutated
-    after construction; the service layer creates a new instance when a
-    configuration is changed before run start.
+    Dataclass này frozen để object ``RunConfig`` không bị mutate sau khi tạo.
+    Nếu cần đổi cấu hình trước khi run bắt đầu, tầng service sẽ tạo instance mới.
 
     Parameters
     ----------
     name:
-        Human-readable label for the run.
+        Tên dễ đọc cho run.
     dataset_source:
-        CSV path or MySQL table/query description. Stored for provenance.
+        Đường dẫn CSV hoặc mô tả bảng/query MySQL. Dùng để truy vết nguồn dữ liệu.
 
-    Kalman fields (validated via ``KalmanConfig``)
-    -----------------------------------------------
+    Các field Kalman, validate qua ``KalmanConfig``
+    ------------------------------------------------
     x0, P0, Q, R0, R_min, R_max, alpha
 
-    Chronological split ratios
-    --------------------------
-    train_ratio, val_ratio, test_ratio  — must be positive, sum to 1.0.
+    Tỷ lệ chia theo thời gian
+    -------------------------
+    train_ratio, val_ratio, test_ratio phải dương và tổng bằng 1.0.
 
-    ARX fields (validated via ``ARXTrainConfig``)
-    ---------------------------------------------
+    Các field ARX, validate qua ``ARXTrainConfig``
+    ----------------------------------------------
     arx_na, arx_nb, arx_nk
-    arx_input_cols  — tuple of column names drawn from the ARX field map.
+    arx_input_cols là tuple tên cột lấy từ field map của ARX.
 
-    Preprocessing
-    -------------
-    preprocessing_policy  — one of "keep_last", "interpolate", "skip".
+    Tiền xử lý
+    ----------
+    preprocessing_policy là một trong "keep_last", "interpolate", "skip".
     """
 
-    # Run metadata
+    # Metadata của run
     name: str = "unnamed_run"
     dataset_source: str = ""
 
-    # ── Kalman parameters ──────────────────────────────────────────────────────
+    # ── Tham số Kalman ────────────────────────────────────────────────────────
     x0: float = 0.0
     P0: float = 1.0
     Q: float = 0.05
@@ -100,26 +98,26 @@ class RunConfig:
     R_max: float = 25.0
     alpha: float = 0.95
 
-    # ── Split ratios ───────────────────────────────────────────────────────────
+    # ── Tỷ lệ chia tập dữ liệu ────────────────────────────────────────────────
     train_ratio: float = 0.60
     val_ratio: float = 0.20
     test_ratio: float = 0.20
 
-    # ── ARX model order ────────────────────────────────────────────────────────
+    # ── Bậc model ARX ─────────────────────────────────────────────────────────
     arx_na: int = 2
     arx_nb: int = 2
     arx_nk: int = 1
     arx_input_cols: tuple[str, ...] = field(default=_DEFAULT_INPUT_COLS)
 
-    # ── Preprocessing ──────────────────────────────────────────────────────────
+    # ── Tiền xử lý ────────────────────────────────────────────────────────────
     preprocessing_policy: str = "keep_last"
 
-    # ── Validation ────────────────────────────────────────────────────────────
+    # ── Validate ──────────────────────────────────────────────────────────────
 
     def __post_init__(self) -> None:
-        # Coerce arx_input_cols to an immutable tuple regardless of what the caller
-        # passed (list, generator, etc.).  Must be done via object.__setattr__
-        # because the dataclass is frozen — direct assignment raises FrozenInstanceError.
+        # Ép arx_input_cols về tuple bất biến dù caller truyền list, generator...
+        # Vì dataclass frozen nên phải dùng object.__setattr__; gán trực tiếp sẽ
+        # raise FrozenInstanceError.
         try:
             arx_input_cols = tuple(self.arx_input_cols)
         except TypeError as exc:
@@ -128,7 +126,7 @@ class RunConfig:
             ) from exc
         object.__setattr__(self, "arx_input_cols", arx_input_cols)
 
-        # Delegate Kalman validation — reuses KalmanConfig's battle-tested checks.
+        # Giao validate Kalman cho KalmanConfig để tái sử dụng các check đã có.
         KalmanConfig(
             x0=self.x0,
             P0=self.P0,
@@ -139,7 +137,7 @@ class RunConfig:
             alpha=self.alpha,
         )
 
-        # Split ratios: each positive, sum == 1.0
+        # Tỷ lệ chia dữ liệu: mỗi tỷ lệ phải dương và tổng bằng 1.0.
         for _name, _val in (
             ("train_ratio", self.train_ratio),
             ("val_ratio", self.val_ratio),
@@ -154,7 +152,7 @@ class RunConfig:
                 f"got {_total!r}"
             )
 
-        # ARX validation — reuses ARXTrainConfig's checks.
+        # Validate ARX bằng ARXTrainConfig.
         ARXTrainConfig(
             na=self.arx_na,
             nb=self.arx_nb,
@@ -162,17 +160,17 @@ class RunConfig:
             input_cols=self.arx_input_cols,
         )
 
-        # Preprocessing policy
+        # Chính sách tiền xử lý.
         if self.preprocessing_policy not in _VALID_PREPROCESS_POLICIES:
             raise ValueError(
                 f"preprocessing_policy must be one of {sorted(_VALID_PREPROCESS_POLICIES)}, "
                 f"got {self.preprocessing_policy!r}"
             )
 
-    # ── Sub-config extraction ─────────────────────────────────────────────────
+    # ── Trích sub-config ─────────────────────────────────────────────────────
 
     def to_kalman_config(self) -> KalmanConfig:
-        """Return the ``KalmanConfig`` corresponding to this run's Kalman parameters."""
+        """Trả về ``KalmanConfig`` tương ứng với tham số Kalman của run này."""
         return KalmanConfig(
             x0=self.x0,
             P0=self.P0,
@@ -184,7 +182,7 @@ class RunConfig:
         )
 
     def to_arx_train_config(self) -> ARXTrainConfig:
-        """Return the ``ARXTrainConfig`` corresponding to this run's ARX parameters."""
+        """Trả về ``ARXTrainConfig`` tương ứng với tham số ARX của run này."""
         return ARXTrainConfig(
             na=self.arx_na,
             nb=self.arx_nb,
@@ -192,21 +190,21 @@ class RunConfig:
             input_cols=self.arx_input_cols,
         )
 
-    # ── JSON serialisation ────────────────────────────────────────────────────
+    # ── Serialize JSON ───────────────────────────────────────────────────────
 
     def to_json(self) -> str:
-        """Serialise to a JSON string suitable for ``ExperimentConfig.raw_config_json``."""
+        """Serialize thành chuỗi JSON để ghi vào ``ExperimentConfig.raw_config_json``."""
         d = asdict(self)
-        # tuple fields are not JSON-serialisable directly; convert to list.
+        # Tuple không serialize trực tiếp sang JSON được, nên đổi sang list.
         d["arx_input_cols"] = list(d["arx_input_cols"])
         return json.dumps(d, ensure_ascii=False)
 
     @classmethod
     def from_json(cls, raw: str) -> "RunConfig":
-        """Deserialise from ``ExperimentConfig.raw_config_json``.
+        """Deserialize từ ``ExperimentConfig.raw_config_json``.
 
-        Raises ``ValueError`` if the payload is missing required fields or
-        contains invalid values.
+        Raise ``ValueError`` nếu payload thiếu field bắt buộc hoặc có giá trị
+        không hợp lệ.
         """
         try:
             d = json.loads(raw)
@@ -219,19 +217,18 @@ class RunConfig:
         except TypeError as exc:
             raise ValueError(f"RunConfig JSON has unexpected fields: {exc}") from exc
 
-    # ── ORM round-trip ────────────────────────────────────────────────────────
+    # ── Vòng đời ORM ─────────────────────────────────────────────────────────
 
     @classmethod
     def from_experiment_config(cls, db_row: object) -> "RunConfig":
-        """Reconstruct a ``RunConfig`` from an ``ExperimentConfig`` ORM row.
+        """Dựng lại ``RunConfig`` từ một dòng ORM ``ExperimentConfig``.
 
-        Reads the structured columns (not ``raw_config_json``) so the result
-        is authoritative even if the JSON snapshot is from an older schema.
-        The ARX input_cols fall back to the defaults when the row was created
-        before this field existed.
+        Đọc các cột có cấu trúc thay vì chỉ đọc ``raw_config_json``, để kết quả
+        vẫn là nguồn đáng tin kể cả khi snapshot JSON thuộc schema cũ. Nếu dòng
+        được tạo trước khi có field ARX input_cols thì fallback về mặc định.
         """
-        # arx_input_cols may not be stored directly on the Django model (it lives
-        # in raw_config_json).  Try JSON first; fall back to default.
+        # arx_input_cols có thể không lưu trực tiếp trên Django model mà nằm
+        # trong raw_config_json. Thử đọc JSON trước, nếu lỗi thì dùng mặc định.
         arx_cols: tuple[str, ...] = _DEFAULT_INPUT_COLS
         raw_json: str = getattr(db_row, "raw_config_json", "{}")
         try:

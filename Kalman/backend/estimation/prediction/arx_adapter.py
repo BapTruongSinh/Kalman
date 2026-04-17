@@ -1,19 +1,17 @@
 """
-ARX prediction adapter — wraps ``arx_pipeline.py`` behind ``PredictionAdapter``.
+ARX prediction adapter, bọc ``arx_pipeline.py`` phía sau ``PredictionAdapter``.
 
-This module exposes ``ARXPredictionAdapter``, the v1 baseline prediction model.
-It reproduces the OLS training and 1-step prediction logic from ``arx_pipeline.py``
-using only NumPy and ``ProcessedRecord`` objects so no notebook-level code is
-imported at runtime.
+Module này cung cấp ``ARXPredictionAdapter``, model dự đoán baseline của v1.
+Nó tái hiện logic train OLS và dự đoán trước 1 bước từ ``arx_pipeline.py``,
+nhưng chỉ dùng NumPy và object ``ProcessedRecord`` để không import code kiểu
+notebook khi chạy backend.
 
-Two artifact formats are supported by ``load_artifact()``:
+``load_artifact()`` hỗ trợ hai format artifact:
 
-- **Native format** (written by ``save_artifact()``): contains an
-  ``"adapter_version"`` key.
-- **Pipeline format** (written by ``arx_pipeline.save_artifact()``): contains
-  ``model="ARX"`` and the ``model_config`` / ``theta_hat`` structure produced
-  by the existing notebook pipeline.  ``best_candidate`` is preferred when
-  present.
+- **Native format** do ``save_artifact()`` ghi ra, có key ``"adapter_version"``.
+- **Pipeline format** do ``arx_pipeline.save_artifact()`` ghi ra, có
+  ``model="ARX"`` và cấu trúc ``model_config`` / ``theta_hat`` từ pipeline
+  notebook hiện có. Nếu có ``best_candidate`` thì ưu tiên dùng nó.
 
 Training example::
 
@@ -49,8 +47,8 @@ from .base import PredictionAdapter, PredictionInput, PredictionResult
 
 logger = logging.getLogger(__name__)
 
-# ── Field mapping ─────────────────────────────────────────────────────────────
-# ProcessedRecord attribute name → DataFrame / ARX column name
+# ── Ánh xạ field ─────────────────────────────────────────────────────────────
+# Tên attribute của ProcessedRecord → tên cột DataFrame / ARX.
 _FIELD_MAP: dict[str, str] = {
     "soil_moisture": "Soil_Moisture",
     "temperature": "Temperature",
@@ -61,7 +59,7 @@ _FIELD_MAP: dict[str, str] = {
     "fan": "Fan",
 }
 
-# ARX column name → ProcessedRecord attribute name (reverse of _FIELD_MAP)
+# Tên cột ARX → tên attribute của ProcessedRecord (đảo ngược từ _FIELD_MAP).
 _COL_TO_ATTR: dict[str, str] = {v: k for k, v in _FIELD_MAP.items()}
 
 _DEFAULT_INPUT_COLS: tuple[str, ...] = (
@@ -74,29 +72,30 @@ _DEFAULT_INPUT_COLS: tuple[str, ...] = (
 )
 
 
-# ── Configuration ─────────────────────────────────────────────────────────────
+# ── Cấu hình ─────────────────────────────────────────────────────────────────
 
 
 @dataclass(frozen=True)
 class ARXTrainConfig:
-    """Hyperparameters for offline ARX model training.
+    """Các siêu tham số để train model ARX offline.
 
     Attributes
     ----------
     na:
-        AR order — number of lagged output terms.
+        Bậc AR, tức số thành phần output trễ.
     nb:
-        Exogenous input order — number of lagged input terms per channel.
+        Bậc input ngoại sinh, tức số thành phần input trễ trên mỗi kênh.
     nk:
-        Input delay (dead-time).  ``nk=1`` means no dead-time beyond one step.
+        Độ trễ input (dead-time). ``nk=1`` nghĩa là không có dead-time ngoài
+        một bước trễ cơ bản.
     include_intercept:
-        Whether to add a constant term to the regression.
+        Có thêm hệ số chặn vào hồi quy hay không.
     input_cols:
-        Ordered tuple of ARX/DataFrame column names (e.g. ``"Temperature"``,
-        ``"Humidity"``).  Must be drawn from ``_FIELD_MAP`` *values*.
+        Tuple có thứ tự của tên cột ARX/DataFrame, ví dụ ``"Temperature"``,
+        ``"Humidity"``. Phải nằm trong các *value* của ``_FIELD_MAP``.
     output_col:
-        Output column name (e.g. ``"Soil_Moisture"``).  Must be one of the
-        ``_FIELD_MAP`` *values*.
+        Tên cột output, ví dụ ``"Soil_Moisture"``. Phải là một *value* trong
+        ``_FIELD_MAP``.
     """
 
     na: int = 2
@@ -107,7 +106,7 @@ class ARXTrainConfig:
     output_col: str = "Soil_Moisture"
 
     def __post_init__(self) -> None:
-        """Validate hyperparameters at construction time."""
+        """Validate siêu tham số ngay khi tạo object."""
         _known: frozenset[str] = frozenset(_FIELD_MAP.values())
         if self.na < 1:
             raise ValueError(f"na must be >= 1, got {self.na!r}")
@@ -131,16 +130,16 @@ class ARXTrainConfig:
 
     @property
     def max_lag(self) -> int:
-        """Maximum lag index required for building the regression row."""
+        """Chỉ số lag lớn nhất cần để xây một dòng hồi quy."""
         return max(self.na, self.nb + self.nk - 1)
 
     @property
     def min_history_len(self) -> int:
-        """Minimum history window size for a valid 1-step prediction."""
+        """Kích thước history tối thiểu để dự đoán trước 1 bước."""
         return self.max_lag
 
     def param_names(self) -> list[str]:
-        """Return ordered parameter names matching ``theta_hat``."""
+        """Trả về tên tham số theo đúng thứ tự của ``theta_hat``."""
         names = [f"a{lag}" for lag in range(1, self.na + 1)]
         for col in self.input_cols:
             for lag in range(1, self.nb + 1):
@@ -153,17 +152,17 @@ class ARXTrainConfig:
         return len(self.param_names())
 
 
-# ── Internal numerical helpers ────────────────────────────────────────────────
+# ── Helper tính toán nội bộ ──────────────────────────────────────────────────
 
 
 def _records_to_arrays(
     records: Sequence[ProcessedRecord],
     config: ARXTrainConfig,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Convert a ``ProcessedRecord`` sequence to an OLS regression matrix.
+    """Chuyển chuỗi ``ProcessedRecord`` thành ma trận hồi quy OLS.
 
-    Mirrors ``arx_pipeline.build_regression_matrix`` but works directly on
-    ``ProcessedRecord`` objects — no pandas dependency required.
+    Tương đương ``arx_pipeline.build_regression_matrix`` nhưng làm trực tiếp
+    trên object ``ProcessedRecord``, không cần phụ thuộc pandas.
 
     Returns
     -------
@@ -173,7 +172,7 @@ def _records_to_arrays(
     Raises
     ------
     ValueError
-        If there are not enough records for the configured lag order.
+        Nếu không đủ record cho bậc trễ đã cấu hình.
     """
     n = len(records)
     max_lag = config.max_lag
@@ -205,10 +204,10 @@ def _records_to_arrays(
     for row_idx in range(n_eff):
         t = row_idx + max_lag
         row: list[float] = []
-        # AR part: lagged output
+        # Phần AR: output trễ.
         for lag in range(1, config.na + 1):
             row.append(float(y[t - lag]))
-        # Exogenous part: lagged inputs with dead-time nk
+        # Phần ngoại sinh: input trễ có xét dead-time nk.
         for u in input_arrays:
             for lag in range(config.nk, config.nk + config.nb):
                 row.append(float(u[t - lag]))
@@ -224,17 +223,17 @@ def _build_prediction_row(
     history: Sequence[ProcessedRecord],
     config: ARXTrainConfig,
 ) -> np.ndarray:
-    """Build the regression row vector for a single 1-step prediction.
+    """Xây vector hồi quy cho một lần dự đoán trước 1 bước.
 
-    Uses the most-recent ``config.min_history_len`` records in *history*
-    via negative indexing so any extra earlier records are ignored.
+    Dùng ``config.min_history_len`` record gần nhất trong *history* bằng
+    negative indexing, nên các record cũ hơn sẽ bị bỏ qua.
 
     Parameters
     ----------
     history:
-        At least ``config.min_history_len`` records, chronological order.
+        Ít nhất ``config.min_history_len`` record, theo thứ tự thời gian.
     config:
-        Must match the config used during training.
+        Phải khớp với config đã dùng khi train.
 
     Returns
     -------
@@ -256,10 +255,10 @@ def _build_prediction_row(
         )
 
     row: list[float] = []
-    # AR part: last na output values (lag 1 = most recent)
+    # Phần AR: na giá trị output gần nhất (lag 1 = mới nhất).
     for lag in range(1, config.na + 1):
         row.append(float(y[-lag]))
-    # Exogenous part: last inputs with dead-time nk
+    # Phần ngoại sinh: input gần nhất có xét dead-time nk.
     for u in input_arrays:
         for lag in range(config.nk, config.nk + config.nb):
             row.append(float(u[-lag]))
@@ -272,12 +271,12 @@ def _build_prediction_row(
 def _ols_fit(
     x_mat: np.ndarray, y_vec: np.ndarray
 ) -> tuple[np.ndarray, float]:
-    """Ordinary least-squares fit.
+    """Fit Ordinary Least Squares.
 
     Returns
     -------
     theta : np.ndarray, shape ``(n_params,)``
-    sigma2 : float — residual variance estimate
+    sigma2 : float — ước lượng phương sai phần dư
     """
     theta, _, _, _ = np.linalg.lstsq(x_mat, y_vec, rcond=None)
     n_obs, n_params = x_mat.shape
@@ -287,7 +286,7 @@ def _ols_fit(
 
 
 def _metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
-    """Compute RMSE, MAE, and R² between *y_true* and *y_pred*."""
+    """Tính RMSE, MAE và R² giữa *y_true* và *y_pred*."""
     resid = y_true - y_pred
     rmse = float(np.sqrt(np.mean(resid ** 2)))
     mae = float(np.mean(np.abs(resid)))
@@ -301,10 +300,10 @@ def _metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict[str, float]:
 
 
 class ARXPredictionAdapter(PredictionAdapter):
-    """ARX baseline prediction adapter.
+    """Prediction adapter baseline dùng ARX.
 
-    Wraps offline OLS training and 1-step prediction behind the
-    ``PredictionAdapter`` contract.  No notebook-level code is imported.
+    Bọc việc train OLS offline và dự đoán trước 1 bước phía sau hợp đồng
+    ``PredictionAdapter``. Không import code tầng notebook.
 
     Lifecycle
     ---------
@@ -313,14 +312,13 @@ class ARXPredictionAdapter(PredictionAdapter):
     3. **Reload**: ``ARXPredictionAdapter.load_artifact(path)``
     4. **Predict**: ``adapter.predict(PredictionInput(history=recent))``
 
-    Loading ``arx_model.json``
-    --------------------------
-    ``load_artifact()`` accepts both the native format written by
-    ``save_artifact()`` *and* the format written by the existing
-    ``arx_pipeline.save_artifact()`` (from ``../ARX/arx_pipeline.py``).
-    When ``"best_candidate"`` is present in the pipeline artifact, its
-    ``model_config`` and ``theta_hat`` are used in preference to the
-    baseline order.
+    Load ``arx_model.json``
+    -----------------------
+    ``load_artifact()`` nhận cả native format do ``save_artifact()`` ghi ra
+    *và* format do ``arx_pipeline.save_artifact()`` hiện có ghi ra
+    (từ ``../ARX/arx_pipeline.py``). Nếu pipeline artifact có
+    ``"best_candidate"``, adapter ưu tiên dùng ``model_config`` và
+    ``theta_hat`` của candidate đó.
     """
 
     _KIND = "arx"
@@ -332,7 +330,7 @@ class ARXPredictionAdapter(PredictionAdapter):
         self._train_metrics: dict[str, float] | None = None
         self._val_metrics: dict[str, float] | None = None
 
-    # ── PredictionAdapter interface ────────────────────────────────────────
+    # ── Interface PredictionAdapter ────────────────────────────────────────
 
     @property
     def model_kind(self) -> str:
@@ -348,20 +346,20 @@ class ARXPredictionAdapter(PredictionAdapter):
 
     @property
     def train_config(self) -> ARXTrainConfig:
-        """Return the ARX hyperparameter configuration."""
+        """Trả về cấu hình siêu tham số ARX."""
         return self._config
 
     @property
     def train_metrics(self) -> dict[str, float] | None:
-        """Training-set metrics set after ``train()``, else ``None``."""
+        """Metric trên tập train sau ``train()``, nếu chưa có thì ``None``."""
         return dict(self._train_metrics) if self._train_metrics else None
 
     @property
     def val_metrics(self) -> dict[str, float] | None:
-        """Validation-set metrics set after ``train(val_records=…)``, else ``None``."""
+        """Metric trên tập validation sau ``train(val_records=...)``, nếu chưa có thì ``None``."""
         return dict(self._val_metrics) if self._val_metrics else None
 
-    # ── Training ──────────────────────────────────────────────────────────
+    # ── Train ─────────────────────────────────────────────────────────────
 
     def train(
         self,
@@ -369,26 +367,26 @@ class ARXPredictionAdapter(PredictionAdapter):
         *,
         val_records: Sequence[ProcessedRecord] | None = None,
     ) -> dict[str, object]:
-        """Offline OLS training on *records*.
+        """Train OLS offline trên *records*.
 
         Parameters
         ----------
         records:
-            Training records in chronological order.
+            Record train theo thứ tự thời gian.
         val_records:
-            Optional held-out records for validation metric reporting.
+            Record hold-out tùy chọn để báo cáo metric validation.
 
         Returns
         -------
         dict
-            Summary with keys: ``model_kind``, ``na``, ``nb``, ``nk``,
+            Tóm tắt gồm các key: ``model_kind``, ``na``, ``nb``, ``nk``,
             ``n_params``, ``n_train``, ``sigma2``, ``train_metrics``, and
             optionally ``n_val`` / ``val_metrics``.
 
         Raises
         ------
         ValueError
-            If *records* is too short for the configured lag order.
+            Nếu *records* quá ngắn so với bậc trễ đã cấu hình.
         """
         logger.info(
             "ARX training: %d records, na=%d nb=%d nk=%d",
@@ -431,34 +429,32 @@ class ARXPredictionAdapter(PredictionAdapter):
         )
         return summary
 
-    # ── Prediction ────────────────────────────────────────────────────────
+    # ── Dự đoán ──────────────────────────────────────────────────────────
 
     def predict(self, inp: PredictionInput) -> PredictionResult:
-        """1-step ``Soil_Moisture`` prediction from recent history.
+        """Dự đoán ``Soil_Moisture`` trước 1 bước từ history gần nhất.
 
-        Returns ``status="unavailable"`` (not an exception) when the model
-        is not trained or the history window is too short.  Returns
-        ``status="error"`` if the numeric computation fails.
+        Trả ``status="unavailable"`` thay vì exception khi model chưa train
+        hoặc history quá ngắn. Trả ``status="error"`` nếu tính toán số bị lỗi.
 
-        This method **never raises** — every failure path returns a
-        ``PredictionResult`` with an appropriate ``status`` and ``reason``.
+        Method này **không bao giờ raise**; mọi nhánh lỗi đều trả
+        ``PredictionResult`` với ``status`` và ``reason`` phù hợp.
 
         Parameters
         ----------
         inp:
-            Must have at least ``min_history_len`` records.  Fields must be
-            non-``None`` (fill via preprocessor before calling predict).
-            Passing ``None`` or a malformed object returns ``status="error"``.
+            Phải có ít nhất ``min_history_len`` record. Các field phải khác
+            ``None`` (được preprocessor điền trước khi gọi predict). Nếu truyền
+            ``None`` hoặc object sai dạng thì trả ``status="error"``.
 
         Returns
         -------
         PredictionResult
-            Inspect ``status`` before using ``value``.
+            Cần kiểm tra ``status`` trước khi dùng ``value``.
         """
-        # ── Input safety guard ─────────────────────────────────────────────────
-        # Extract history and its length before any logic so that None inp,
-        # None history, or any non-sequence history object never propagates
-        # as an unhandled exception.
+        # ── Chặn input lỗi ────────────────────────────────────────────────────
+        # Lấy history và độ dài trước mọi logic khác, để inp None, history None,
+        # hoặc history không phải sequence không biến thành exception chưa xử lý.
         try:
             raw_history = inp.history  # type: ignore[union-attr]
             history: list = [] if raw_history is None else raw_history
@@ -492,7 +488,7 @@ class ARXPredictionAdapter(PredictionAdapter):
             )
 
         try:
-            # Determine which ProcessedRecord attributes are required
+            # Xác định các attribute ProcessedRecord bắt buộc phải có.
             out_attr = _COL_TO_ATTR.get(self._config.output_col, "soil_moisture")
             input_attrs = [
                 _COL_TO_ATTR.get(col, col.lower())
@@ -500,7 +496,7 @@ class ARXPredictionAdapter(PredictionAdapter):
             ]
             required_attrs = [out_attr] + input_attrs
 
-            # Check for None values in required fields of recent records
+            # Kiểm tra giá trị None trong các field bắt buộc của record gần nhất.
             needed = history[-self.min_history_len:]
             none_fields: list[str] = []
             for rec in needed:
@@ -546,19 +542,18 @@ class ARXPredictionAdapter(PredictionAdapter):
                 reason=f"Prediction error: {exc}",
             )
 
-    # ── Artifact persistence ──────────────────────────────────────────────
+    # ── Lưu / nạp artifact ────────────────────────────────────────────────
 
     def save_artifact(self, path: Path) -> None:
-        """Persist the trained model as a JSON artifact.
+        """Lưu model đã train thành JSON artifact.
 
-        The written file uses the *native* format understood by
-        ``load_artifact()``.  It also contains enough information for a
-        human to reconstruct the model manually.
+        File ghi ra dùng *native* format mà ``load_artifact()`` hiểu được.
+        File cũng chứa đủ thông tin để con người dựng lại model thủ công.
 
         Raises
         ------
         RuntimeError
-            If the model has not been trained yet.
+            Nếu model chưa được train.
         """
         if not self.is_trained:
             raise RuntimeError(
@@ -591,22 +586,21 @@ class ARXPredictionAdapter(PredictionAdapter):
 
     @classmethod
     def load_artifact(cls, path: Path) -> "ARXPredictionAdapter":
-        """Restore a trained adapter from a JSON artifact.
+        """Khôi phục adapter đã train từ JSON artifact.
 
         Supports two formats:
 
-        - **Native** (``"adapter_version"`` key present): written by
-          ``save_artifact()``.
-        - **Pipeline** (``model="ARX"`` + ``"model_config"``): written by
-          the existing ``arx_pipeline.save_artifact()``; ``"best_candidate"``
-          config and theta are used when present.
+        - **Native** (có key ``"adapter_version"``): do ``save_artifact()`` ghi.
+        - **Pipeline** (``model="ARX"`` + ``"model_config"``): do
+          ``arx_pipeline.save_artifact()`` hiện có ghi; nếu có
+          ``"best_candidate"`` thì dùng config và theta của nó.
 
         Raises
         ------
         FileNotFoundError
-            If *path* does not exist.
+            Nếu *path* không tồn tại.
         ValueError
-            If the artifact format cannot be recognised.
+            Nếu format artifact không nhận diện được.
         """
         if not path.exists():
             raise FileNotFoundError(f"Artifact not found: {path}")
@@ -624,11 +618,11 @@ class ARXPredictionAdapter(PredictionAdapter):
             "'model_config' (pipeline format)"
         )
 
-    # ── Private loaders ───────────────────────────────────────────────────
+    # ── Hàm nạp nội bộ ────────────────────────────────────────────────────
 
     @classmethod
     def _load_native(cls, data: dict[str, Any]) -> "ARXPredictionAdapter":
-        """Load native adapter-format artifact."""
+        """Nạp artifact theo native adapter format."""
         cfg_d = data["model_config"]
         config = ARXTrainConfig(
             na=int(cfg_d["na"]),
@@ -655,11 +649,11 @@ class ARXPredictionAdapter(PredictionAdapter):
 
     @classmethod
     def _load_pipeline_format(cls, data: dict[str, Any]) -> "ARXPredictionAdapter":
-        """Load from ``arx_pipeline.save_artifact()`` format.
+        """Nạp từ format của ``arx_pipeline.save_artifact()``.
 
-        Uses ``best_candidate`` config, theta, **and sigma2** when present;
-        falls back to the top-level ``model_config`` / ``theta_hat`` /
-        ``sigma2`` otherwise.
+        Nếu có thì dùng config, theta **và sigma2** của ``best_candidate``;
+        nếu không thì fallback về ``model_config`` / ``theta_hat`` /
+        ``sigma2`` ở top-level.
         """
         top_cfg_d: dict[str, Any] = data["model_config"]
         best_used = "best_candidate" in data and "theta_hat" in data["best_candidate"]
@@ -668,9 +662,9 @@ class ARXPredictionAdapter(PredictionAdapter):
             best: dict[str, Any] = data["best_candidate"]
             cfg_d: dict[str, Any] = best.get("model_config", top_cfg_d)
             theta_list: list[float] = best["theta_hat"]
-            # Use best_candidate's sigma2 — consistent with the chosen theta
+            # Dùng sigma2 của best_candidate để nhất quán với theta đã chọn.
             sigma2_raw = best.get("sigma2")
-            # Extract val metrics from best_candidate.val
+            # Lấy metric validation từ best_candidate.val.
             val_m_raw: dict[str, Any] = (
                 best.get("val", {}).get("metrics_1step", {})
             )
@@ -702,7 +696,7 @@ class ARXPredictionAdapter(PredictionAdapter):
         adapter._theta = theta
         adapter._sigma2 = float(sigma2_raw) if sigma2_raw is not None else float("nan")
 
-        # Map pipeline RMSE/MAE/R2 keys to adapter-convention lowercase keys
+        # Map key RMSE/MAE/R2 của pipeline sang key chữ thường theo adapter.
         train_m_raw: dict[str, Any] = (
             data.get("slices", {}).get("train", {}).get("metrics_1step", {})
         )

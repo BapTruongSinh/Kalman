@@ -1,22 +1,23 @@
 """
-Root pytest configuration for the Kalman backend.
+Cấu hình pytest gốc cho backend Kalman.
 
-Sets ``DJANGO_SETTINGS_MODULE`` before Django is loaded, so that any test
-module that imports Django models (e.g. ``estimation.run_config.service``)
-finds the settings already configured.
+Set ``DJANGO_SETTINGS_MODULE`` trước khi Django được load, để mọi test module
+import Django model, ví dụ ``estimation.run_config.service``, đều thấy settings
+đã được cấu hình.
 
-pytest-django is used for database access in ``TestCase``-based tests.
-Pure-Python tests (estimation.kalman, estimation.prediction,
-estimation.ingestion) continue to work without database setup.
+pytest-django được dùng cho các test cần database theo kiểu ``TestCase``.
+Các test Python thuần như estimation.kalman, estimation.prediction,
+estimation.ingestion vẫn chạy được mà không cần setup DB.
 """
 
 import django
 import os
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
-# Predictable defaults for the suite: a local .env with DJANGO_ENV=production
-# would otherwise default DASHBOARD_REQUIRE_AUTH on and break unauthenticated
-# APIClient tests. Explicit exports in the shell still win (setdefault).
+# Giá trị mặc định ổn định cho test suite: nếu local .env đặt
+# DJANGO_ENV=production thì DASHBOARD_REQUIRE_AUTH sẽ mặc định bật và làm hỏng
+# các APIClient test không xác thực. Biến export trực tiếp trong shell vẫn thắng
+# vì ở đây dùng setdefault.
 os.environ.setdefault("DJANGO_ENV", "development")
 os.environ.setdefault("DASHBOARD_REQUIRE_AUTH", "false")
 

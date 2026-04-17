@@ -100,7 +100,7 @@ if IS_PRODUCTION:
 
     _proxy = os.environ.get("DJANGO_SECURE_PROXY_SSL_HEADER", "").strip()
     if _proxy:
-        # Format: "HTTP_X_FORWARDED_PROTO,https"
+        # Định dạng: "HTTP_X_FORWARDED_PROTO,https"
         parts = [p.strip() for p in _proxy.split(",", 1)]
         if len(parts) == 2:
             SECURE_PROXY_SSL_HEADER = (parts[0], parts[1])

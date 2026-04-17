@@ -1,20 +1,19 @@
 """
-Prediction adapter contract for the Adaptive Kalman estimation pipeline.
+Hợp đồng prediction adapter cho pipeline ước lượng Adaptive Kalman.
 
-Any model that produces next-step ``Soil_Moisture`` predictions must implement
-``PredictionAdapter``.  The ARX baseline lives in ``arx_adapter.py``; future
-LightGBM / XGBoost adapters follow the same boundary so the Kalman estimator
-(task #005) never depends on model internals.
+Bất kỳ model nào sinh dự đoán ``Soil_Moisture`` bước kế tiếp đều phải implement
+``PredictionAdapter``. Baseline ARX nằm trong ``arx_adapter.py``; các adapter
+LightGBM / XGBoost sau này cũng đi qua cùng boundary này để bộ Kalman
+(task #005) không phụ thuộc vào chi tiết nội bộ của model.
 
-Design constraints
+Ràng buộc thiết kế
 ------------------
-- ``predict()`` must never raise: use ``status="error"`` or ``"unavailable"``
-  so the Kalman cycle can proceed with prediction unavailable rather than
-  crashing.
-- All numeric field values in ``PredictionInput.history`` are expected to be
-  non-``None`` (the preprocessor, task #003, fills them in beforehand).
-- ``model_kind`` is a short lowercase identifier (``"arx"``, ``"lightgbm"``, …)
-  stored alongside each cycle log row for audit.
+- ``predict()`` không được raise: dùng ``status="error"`` hoặc
+  ``"unavailable"`` để chu kỳ Kalman vẫn chạy tiếp khi không có dự đoán.
+- Các giá trị số trong ``PredictionInput.history`` được kỳ vọng là khác
+  ``None``; preprocessor ở task #003 chịu trách nhiệm điền trước đó.
+- ``model_kind`` là định danh ngắn, chữ thường như ``"arx"``, ``"lightgbm"``,
+  được lưu cùng từng dòng log chu kỳ để truy vết.
 """
 
 from __future__ import annotations
@@ -29,16 +28,16 @@ from ..ingestion import ProcessedRecord
 
 @dataclass
 class PredictionInput:
-    """Window of recent preprocessed records needed for a 1-step prediction.
+    """Cửa sổ record đã tiền xử lý, dùng để dự đoán trước 1 bước.
 
-    Records must be in chronological order (oldest first).
-    All effective field values should be non-``None``; the preprocessor must
-    have handled substitution before calling ``predict()``.
+    Các record phải theo thứ tự thời gian, cũ nhất trước. Các field thực tế
+    nên khác ``None``; preprocessor phải xử lý thay thế trước khi gọi
+    ``predict()``.
 
     Attributes
     ----------
     history:
-        At least ``adapter.min_history_len`` records.
+        Cần ít nhất ``adapter.min_history_len`` record.
     """
 
     history: list[ProcessedRecord] = field(default_factory=list)
@@ -46,20 +45,20 @@ class PredictionInput:
 
 @dataclass(frozen=True)
 class PredictionResult:
-    """Outcome of a single 1-step prediction.
+    """Kết quả của một lần dự đoán trước 1 bước.
 
     Attributes
     ----------
     value:
-        Predicted next ``Soil_Moisture``; ``None`` when unavailable.
+        Giá trị ``Soil_Moisture`` dự đoán cho bước kế tiếp; ``None`` nếu không có.
     status:
-        ``"ok"``         — prediction produced successfully.
-        ``"unavailable"`` — model not trained or not enough history.
-        ``"error"``      — computation failed; ``reason`` has details.
+        ``"ok"``: dự đoán thành công.
+        ``"unavailable"``: model chưa train hoặc thiếu history.
+        ``"error"``: tính toán lỗi; chi tiết nằm trong ``reason``.
     model_kind:
-        Short identifier matching ``PredictionAdapter.model_kind``.
+        Định danh ngắn khớp với ``PredictionAdapter.model_kind``.
     reason:
-        Human-readable explanation when ``status != "ok"``.
+        Giải thích dạng dễ đọc khi ``status != "ok"``.
     """
 
     value: float | None
@@ -69,37 +68,37 @@ class PredictionResult:
 
 
 class PredictionAdapter(ABC):
-    """Abstract base for all prediction models in the estimation pipeline.
+    """Abstract base cho mọi model dự đoán trong pipeline ước lượng.
 
-    Implement this class to wrap a specific model behind the boundary that
-    the Kalman estimator calls.  The contract keeps model internals hidden so
-    adapters are swappable without touching the estimator.
+    Implement class này để bọc một model cụ thể phía sau boundary mà bộ Kalman
+    gọi. Hợp đồng này giấu chi tiết nội bộ của model, nhờ đó có thể thay adapter
+    mà không phải sửa estimator.
 
-    Required properties and methods
-    --------------------------------
-    model_kind        — short lowercase identifier, e.g. ``"arx"``
-    is_trained        — ``True`` when a fitted model is ready for prediction
-    min_history_len   — minimum preceding records required by ``predict()``
-    train()           — offline fit on a sequence of ``ProcessedRecord``
-    predict()         — 1-step prediction; must not raise
-    save_artifact()   — persist the fitted model to a file
-    load_artifact()   — classmethod; restore a previously saved adapter
+    Thuộc tính và method bắt buộc
+    -----------------------------
+    model_kind        — định danh chữ thường, ví dụ ``"arx"``
+    is_trained        — ``True`` khi model đã fit và sẵn sàng dự đoán
+    min_history_len   — số record trước đó tối thiểu mà ``predict()`` cần
+    train()           — fit offline trên một chuỗi ``ProcessedRecord``
+    predict()         — dự đoán trước 1 bước; không được raise
+    save_artifact()   — lưu model đã fit ra file
+    load_artifact()   — classmethod; khôi phục adapter đã lưu
     """
 
     @property
     @abstractmethod
     def model_kind(self) -> str:
-        """Short lowercase identifier for the model family, e.g. ``"arx"``."""
+        """Định danh ngắn, chữ thường cho họ model, ví dụ ``"arx"``."""
 
     @property
     @abstractmethod
     def is_trained(self) -> bool:
-        """``True`` when the adapter holds a fitted model ready for prediction."""
+        """``True`` khi adapter đang giữ model đã fit và sẵn sàng dự đoán."""
 
     @property
     @abstractmethod
     def min_history_len(self) -> int:
-        """Minimum number of preceding records required to call ``predict()``."""
+        """Số record trước đó tối thiểu cần có để gọi ``predict()``."""
 
     @abstractmethod
     def train(
@@ -108,61 +107,61 @@ class PredictionAdapter(ABC):
         *,
         val_records: Sequence[ProcessedRecord] | None = None,
     ) -> dict[str, object]:
-        """Fit the model on *records* and return a metrics summary.
+        """Fit model trên *records* và trả về tóm tắt metric.
 
         Parameters
         ----------
         records:
-            Training records in chronological order.  Must have enough rows
-            for the configured lag order.
+            Record train theo thứ tự thời gian. Phải đủ số dòng cho bậc trễ
+            đã cấu hình.
         val_records:
-            Optional held-out records for reporting validation metrics.
+            Record hold-out tùy chọn để báo cáo metric validation.
 
         Returns
         -------
         dict
-            Model-agnostic summary with at least these keys:
+            Tóm tắt không phụ thuộc loại model, tối thiểu có các key:
             ``model_kind``, ``n_train``, ``train_metrics``.
         """
 
     @abstractmethod
     def predict(self, inp: PredictionInput) -> PredictionResult:
-        """Return a 1-step prediction from recent history.
+        """Trả về dự đoán trước 1 bước từ history gần nhất.
 
-        Must **never raise**.  Returns ``status="error"`` or
-        ``status="unavailable"`` on any failure so the Kalman cycle can
-        continue without the prediction step.
+        **Không được raise**. Nếu có lỗi, trả ``status="error"`` hoặc
+        ``status="unavailable"`` để chu kỳ Kalman có thể chạy tiếp mà không
+        cần dự đoán.
 
         Parameters
         ----------
         inp:
-            Recent history; must have at least ``min_history_len`` records.
+            History gần nhất; phải có ít nhất ``min_history_len`` record.
 
         Returns
         -------
         PredictionResult
-            Always a valid object; inspect ``status`` before using ``value``.
+            Luôn là object hợp lệ; cần kiểm tra ``status`` trước khi dùng ``value``.
         """
 
     @abstractmethod
     def save_artifact(self, path: Path) -> None:
-        """Persist the trained model to *path*.
+        """Lưu model đã train xuống *path*.
 
         Raises
         ------
         RuntimeError
-            If the model has not been trained yet.
+            Nếu model chưa được train.
         """
 
     @classmethod
     @abstractmethod
     def load_artifact(cls, path: Path) -> "PredictionAdapter":
-        """Restore a previously saved adapter from *path*.
+        """Khôi phục adapter đã lưu từ *path*.
 
         Raises
         ------
         FileNotFoundError
-            If *path* does not exist.
+            Nếu *path* không tồn tại.
         ValueError
-            If the artifact format is unrecognised.
+            Nếu format artifact không nhận diện được.
         """
