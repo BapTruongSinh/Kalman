@@ -33,7 +33,7 @@ function Gate({ pass }: { pass: boolean | null }) {
       className={pass ? 'text-emerald-400' : 'text-red-400'}
       aria-label={pass ? 'Pass' : 'Fail'}
     >
-      {pass ? '✓ Pass' : '✗ Fail'}
+      {pass ? 'Pass' : 'Fail'}
     </span>
   )
 }
@@ -74,7 +74,7 @@ function SliceTable({ s }: { s: SliceMetrics }) {
                 : 'text-red-300 font-bold'
             }
           >
-            {s.passes_acceptance_gate ? '✓ PASS' : '✗ FAIL'}
+            {s.passes_acceptance_gate ? 'PASS' : 'FAIL'}
           </span>
         ),
     },

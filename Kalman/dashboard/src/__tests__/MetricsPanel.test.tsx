@@ -51,13 +51,13 @@ describe('MetricsPanel', () => {
 
   it('shows PASS for acceptance gate when all gates pass', () => {
     render(<MetricsPanel metrics={makeMetrics({ test: makeSlice() })} />)
-    expect(screen.getByText(/✓ PASS/)).toBeInTheDocument()
+    expect(screen.getByText(/^PASS$/)).toBeInTheDocument()
   })
 
   it('shows FAIL for acceptance gate when variance reduction fails', () => {
     const s = makeSlice({ pass_variance_reduction: false, passes_acceptance_gate: false })
     render(<MetricsPanel metrics={makeMetrics({ test: s })} />)
-    expect(screen.getByText(/✗ FAIL/)).toBeInTheDocument()
+    expect(screen.getByText(/^FAIL$/)).toBeInTheDocument()
   })
 
   it('shows null metrics as em-dash', () => {
@@ -84,9 +84,9 @@ describe('MetricsPanel', () => {
     const nas = screen.getAllByText('N/A')
     // At minimum the three individual gates + acceptance gate render as N/A
     expect(nas.length).toBeGreaterThanOrEqual(4)
-    // Must NOT show ✗ Fail for null
-    expect(screen.queryByText(/✗ Fail/)).toBeNull()
-    expect(screen.queryByText(/✗ FAIL/)).toBeNull()
+    // Null flags must not be rendered as a failed gate.
+    expect(screen.queryByText(/^Fail$/)).toBeNull()
+    expect(screen.queryByText(/^FAIL$/)).toBeNull()
   })
 
   it('renders all three canonical slices in order (train → validation → test)', () => {

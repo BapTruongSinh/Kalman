@@ -1,19 +1,18 @@
 """
-CSV loader for greenhouse dataset.
+Loader CSV cho dataset greenhouse.
 
-Reads a greenhouse CSV (e.g. repo ``ARX/greenhouse_data.csv``; from
-``Kalman/backend`` use ``../../ARX/greenhouse_data.csv``) into a list of
-:class:`RawRecord` dataclasses, then provides a :func:`split_chronological`
-helper for 60/20/20 train/validation/test slices.
+Đọc CSV greenhouse, ví dụ ``ARX/greenhouse_data.csv``; nếu đứng trong
+``Kalman/backend`` thì dùng ``../../ARX/greenhouse_data.csv``. Kết quả được
+chuyển thành list dataclass :class:`RawRecord`, sau đó có helper
+:func:`split_chronological` để chia train/validation/test theo tỉ lệ 60/20/20.
 
-Design notes
-------------
-- ``RawRecord`` is frozen so downstream code cannot mutate source data.
-- Numeric fields are ``float | None``; None means the value was absent or
-  non-parseable in the source file (logged by the caller).
-- Columns ``Month``, ``Season``, ``Soil_Low_SP``, ``Soil_High_SP`` are read
-  but not exposed as typed fields — they are not needed by the v1 estimation
-  pipeline and are intentionally ignored to keep the record slim.
+Ghi chú thiết kế
+----------------
+- ``RawRecord`` là frozen dataclass để code phía sau không sửa dữ liệu gốc.
+- Các field số có kiểu ``float | None``; None nghĩa là giá trị bị thiếu hoặc
+  không parse được từ file nguồn.
+- Các cột ``Month``, ``Season``, ``Soil_Low_SP``, ``Soil_High_SP`` được đọc
+  từ CSV nhưng không đưa vào typed field vì pipeline v1 chưa cần.
 """
 
 from __future__ import annotations
@@ -26,10 +25,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# ─── Timestamp format in the CSV ─────────────────────────────────────────────
+# Format timestamp trong CSV.
 _TS_FORMAT = "%Y-%m-%d %H:%M:%S"
 
-# ─── Numeric columns that the estimation pipeline actually uses ───────────────
+# Các cột số mà pipeline estimation thật sự dùng.
 _NUMERIC_COLS = (
     "Soil_Moisture",
     "Temperature",
@@ -41,14 +40,14 @@ _NUMERIC_COLS = (
 )
 
 
-# ─── Data structures ──────────────────────────────────────────────────────────
+# Cấu trúc dữ liệu.
 
 @dataclass(frozen=True)
 class RawRecord:
-    """One row from the greenhouse dataset after type-coercion.
+    """Một row từ dataset greenhouse sau khi ép kiểu.
 
-    ``row_index`` is the 0-based position in the original file so callers
-    can correlate validation errors back to a source line number.
+    ``row_index`` là vị trí 0-based trong file gốc để khi validation lỗi
+    có thể truy ngược về dòng nguồn.
     """
 
     timestamp: datetime
@@ -64,7 +63,7 @@ class RawRecord:
 
 @dataclass
 class DatasetSplit:
-    """Chronological train/validation/test slices of a dataset."""
+    """Các slice train/validation/test được chia theo thứ tự thời gian."""
 
     train: list[RawRecord]
     validation: list[RawRecord]
@@ -75,31 +74,31 @@ class DatasetSplit:
         return len(self.train) + len(self.validation) + len(self.test)
 
 
-# ─── Loader ───────────────────────────────────────────────────────────────────
+# Loader.
 
 def load_csv(path: Path | str) -> list[RawRecord]:
-    """Parse a greenhouse CSV into a list of :class:`RawRecord`.
+    """Parse CSV greenhouse thành list :class:`RawRecord`.
 
-    Rows with unparseable timestamps are skipped and logged as warnings.
-    Numeric fields that cannot be converted to float are set to ``None``
-    (the validator will flag them later).
+    Row có timestamp không parse được sẽ bị bỏ qua và log warning.
+    Field số không convert được sang float sẽ thành ``None`` để validator
+    đánh dấu ở bước sau.
 
-    Parameters
-    ----------
-    path:
-        Absolute or relative path to the CSV file.
-
-    Returns
+    Tham số
     -------
-    list[RawRecord]
-        Records in file order (oldest first).
+    path:
+        Đường dẫn tuyệt đối hoặc tương đối tới file CSV.
 
-    Raises
+    Trả về
     ------
+    list[RawRecord]
+        Records theo thứ tự trong file.
+
+    Lỗi
+    ---
     FileNotFoundError
-        If the file does not exist.
+        Nếu file không tồn tại.
     ValueError
-        If the file has no rows or is missing required columns.
+        Nếu file không có row hoặc thiếu cột bắt buộc.
     """
     path = Path(path)
     if not path.exists():
@@ -114,7 +113,7 @@ def load_csv(path: Path | str) -> list[RawRecord]:
         if reader.fieldnames is None:
             raise ValueError(f"CSV has no header row: {path}")
 
-        # Validate required columns are present
+        # Kiểm tra các cột bắt buộc có tồn tại không.
         header = set(reader.fieldnames)
         required = {"Timestamp"} | set(_NUMERIC_COLS)
         missing_cols = required - header
@@ -126,8 +125,8 @@ def load_csv(path: Path | str) -> list[RawRecord]:
         for line_no, row in enumerate(reader):
             raw_ts = row.get("Timestamp", "").strip()
             try:
-                # Naive CSV times are treated as UTC so ORM DateTimeField(use_tz=True)
-                # does not emit a warning per row when persisting PipelineCycle.sample_ts.
+                # Timestamp trong CSV không có timezone nên coi là UTC để
+                # DateTimeField(use_tz=True) không warning khi lưu sample_ts.
                 ts = datetime.strptime(raw_ts, _TS_FORMAT).replace(tzinfo=timezone.utc)
             except ValueError:
                 logger.warning(
@@ -167,27 +166,24 @@ def split_chronological(
     train_ratio: float = 0.60,
     val_ratio: float = 0.20,
 ) -> DatasetSplit:
-    """Split records into chronological train / validation / test slices.
+    """Chia records thành train / validation / test theo thứ tự thời gian.
 
-    Records are sorted defensively by timestamp before splitting so that
-    out-of-order inputs (e.g. from a MySQL query without ORDER BY, or a
-    manually reordered CSV) do not silently produce a non-chronological split.
+    Records được sort phòng thủ theo timestamp trước khi chia để input lệch
+    thứ tự, ví dụ query MySQL thiếu ORDER BY, không tạo split sai thứ tự.
 
-    Parameters
-    ----------
+    Tham số
+    -------
     records:
-        Records to split (must be non-empty and large enough for all three
-        slices to be non-empty).
+        Records cần chia, phải không rỗng và đủ lớn để cả ba slice đều có dữ liệu.
     train_ratio:
-        Fraction for training. Default 0.60 (ADR-003).
+        Tỉ lệ train, mặc định 0.60 theo ADR-003.
     val_ratio:
-        Fraction for validation. Default 0.20. Test = 1 - train - val.
+        Tỉ lệ validation, mặc định 0.20. Test = 1 - train - val.
 
-    Raises
-    ------
+    Lỗi
+    ---
     ValueError
-        If ratios are invalid, the records list is empty, or the dataset is
-        too small to produce non-empty train / validation / test slices.
+        Nếu tỉ lệ không hợp lệ, records rỗng, hoặc dataset quá nhỏ.
     """
     if not records:
         raise ValueError("Cannot split an empty record list")
@@ -196,8 +192,8 @@ def split_chronological(
     if train_ratio + val_ratio >= 1.0:
         raise ValueError("train_ratio + val_ratio must be < 1.0")
 
-    # Sort defensively — handles MySQL/query sources and reordered CSV files.
-    # Python's sort is stable, so equal-timestamp records keep their original order.
+    # Sort phòng thủ cho nguồn MySQL/query hoặc CSV bị đảo dòng.
+    # Sort của Python stable nên record trùng timestamp giữ thứ tự gốc.
     records = sorted(records, key=lambda r: r.timestamp)
 
     n = len(records)
@@ -226,10 +222,10 @@ def split_chronological(
     return DatasetSplit(train=train, validation=validation, test=test)
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# Helpers.
 
 def _to_float(row: dict[str, str], col: str, line_no: int) -> float | None:
-    """Convert a CSV cell to float, returning None on failure."""
+    """Convert một ô CSV sang float, lỗi thì trả None."""
     raw = row.get(col, "").strip()
     if raw == "":
         return None

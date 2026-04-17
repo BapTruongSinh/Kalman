@@ -23,9 +23,6 @@ function App() {
           <h1 className="text-lg font-bold text-white">
             Kalman Pipeline Dashboard
           </h1>
-          <span className="text-xs text-slate-400">
-            Raw · Predicted · Filtered
-          </span>
         </header>
 
         <div className="flex flex-1 overflow-hidden">

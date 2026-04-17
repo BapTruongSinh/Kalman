@@ -1,34 +1,28 @@
 """
-Preprocessing policies for greenhouse sensor data.
+Các chính sách tiền xử lý dữ liệu sensor greenhouse.
 
-After validation, each record with an invalid reading must be handled by
-one of three policies before it can enter the estimation pipeline:
+Sau bước validation, mỗi record không hợp lệ phải được xử lý bằng một trong
+ba policy trước khi đi vào estimation pipeline:
 
 keep_last
-    Replace ALL fields of an invalid record with the last known good values.
-    This applies to both missing (None) fields *and* out-of-range non-None
-    values — both must not reach the ARX/Kalman pipeline unchanged.
-    Produces ``preprocess_status="kept_last"`` (or ``"valid"`` for records
-    that did not need substitution).
+    Thay TẤT CẢ field của record lỗi bằng giá trị hợp lệ gần nhất.
+    Áp dụng cho cả field thiếu (None) và field có giá trị vượt ngưỡng.
+    Kết quả có ``preprocess_status="kept_last"``.
 
 interpolate
-    Linearly interpolate between the last valid value and the next valid
-    value for every field of an invalid record.  Out-of-range non-None values
-    are treated the same as missing values — the raw measurement is discarded.
-    Falls back to keep_last when no next valid value is available.
-    Produces ``preprocess_status="interpolated"``.
+    Nội suy tuyến tính giữa giá trị hợp lệ trước đó và giá trị hợp lệ kế tiếp
+    cho mọi field của record lỗi. Nếu không có giá trị kế tiếp thì fallback
+    về keep_last. Kết quả có ``preprocess_status="interpolated"``.
 
 skip
-    Set all effective field values to ``None`` for invalid records.
-    ``preprocess_status="skipped"``.  The Kalman cycle must handle None
-    measurement by skipping the measurement-update step.  This avoids
-    passing out-of-range values downstream while keeping the record in the
-    timeline for bookkeeping.
+    Set tất cả effective field thành ``None`` cho record lỗi.
+    ``preprocess_status="skipped"``. Kalman cycle sẽ bỏ qua bước measurement
+    update khi measurement là None.
 
-Regardless of policy, records whose ``ValidationResult.status`` is
-``"valid"`` come through unchanged with ``preprocess_status="valid"``.
+Record có ``ValidationResult.status`` là ``"valid"`` sẽ đi qua không đổi với
+``preprocess_status="valid"``.
 
-Note: ``preprocess_status`` string values match the choices defined in
+Ghi chú: giá trị ``preprocess_status`` phải khớp choices trong
 ``estimation.models.PipelineCycle.PreprocessStatus``.
 """
 
@@ -43,10 +37,10 @@ from .validator import ValidationResult
 
 logger = logging.getLogger(__name__)
 
-# Numeric fields that can be preprocessed
+# Các field số có thể tiền xử lý.
 _FIELDS = ("soil_moisture", "temperature", "humidity", "light", "drip", "mist", "fan")
 
-# Policy string literals — must match ExperimentConfig.PreprocessPolicy choices
+# Tên policy phải khớp ExperimentConfig.PreprocessPolicy.
 KEEP_LAST = "keep_last"
 INTERPOLATE = "interpolate"
 SKIP = "skip"
@@ -54,23 +48,22 @@ SKIP = "skip"
 VALID_POLICIES = (KEEP_LAST, INTERPOLATE, SKIP)
 
 
-# ─── Processed record ─────────────────────────────────────────────────────────
+# Processed record.
 
 @dataclass(frozen=True)
 class ProcessedRecord:
-    """A record after preprocessing has been applied.
+    """Record sau khi đã áp dụng preprocessing.
 
-    ``raw`` and ``validation`` are kept for full traceability.
-    The ``*`` numeric fields hold the effective values to be fed to the
-    estimation pipeline; they may be ``None`` only when policy=``skip``
-    and no substitution was possible.
+    ``raw`` và ``validation`` được giữ lại để truy vết đầy đủ.
+    Các field số là effective value sẽ đưa vào estimation pipeline; chúng có
+    thể là ``None`` khi policy là ``skip`` hoặc không thể thay thế giá trị.
     """
 
     raw: RawRecord
     validation: ValidationResult
     preprocess_status: str  # valid | kept_last | interpolated | skipped
 
-    # Effective values after preprocessing
+    # Giá trị thực tế sau preprocessing.
     soil_moisture: float | None
     temperature: float | None
     humidity: float | None
@@ -80,34 +73,33 @@ class ProcessedRecord:
     fan: float | None
 
 
-# ─── Public API ───────────────────────────────────────────────────────────────
+# Public API.
 
 def apply_preprocessing(
     records: Sequence[RawRecord],
     validations: Sequence[ValidationResult],
     policy: str = KEEP_LAST,
 ) -> list[ProcessedRecord]:
-    """Apply preprocessing policy to a full sequence of records.
+    """Áp dụng preprocessing policy cho toàn bộ sequence records.
 
-    Parameters
-    ----------
-    records:
-        Raw records in chronological order.
-    validations:
-        One :class:`~validator.ValidationResult` per record (same order).
-    policy:
-        One of ``"keep_last"``, ``"interpolate"``, or ``"skip"``.
-
-    Returns
+    Tham số
     -------
-    list[ProcessedRecord]
-        One processed record per input record.
+    records:
+        Raw records theo thứ tự thời gian.
+    validations:
+        Một :class:`~validator.ValidationResult` cho mỗi record, cùng thứ tự.
+    policy:
+        Một trong ``"keep_last"``, ``"interpolate"``, hoặc ``"skip"``.
 
-    Raises
+    Trả về
     ------
+    list[ProcessedRecord]
+        Một processed record cho mỗi input record.
+
+    Lỗi
+    ---
     ValueError
-        If ``records`` and ``validations`` have different lengths, or
-        ``policy`` is not one of the allowed values.
+        Nếu ``records`` và ``validations`` khác độ dài, hoặc policy không hợp lệ.
     """
     if len(records) != len(validations):
         raise ValueError(
@@ -126,33 +118,31 @@ def apply_preprocessing(
     return _apply_skip(records, validations)
 
 
-# ─── Policy implementations ───────────────────────────────────────────────────
+# Implement từng policy.
 
 def _apply_keep_last(
     records: Sequence[RawRecord],
     validations: Sequence[ValidationResult],
 ) -> list[ProcessedRecord]:
-    """Keep-last-valid: substitute every field of an invalid record.
+    """Keep-last-valid: thay mọi field của record lỗi.
 
-    When a record fails validation — whether due to a None field *or* an
-    out-of-range value — ALL of its effective field values are replaced with
-    the most recently seen valid measurement.  This ensures that out-of-range
-    non-None values never reach the estimation pipeline.
+    Khi record fail validation, dù vì field None hay vượt ngưỡng, tất cả
+    effective field sẽ được thay bằng measurement hợp lệ gần nhất.
     """
     last_valid: dict[str, float | None] = {f: None for f in _FIELDS}
     result: list[ProcessedRecord] = []
 
     for record, vr in zip(records, validations):
         if vr.is_valid:
-            # Update last-known-good values and pass through unchanged
+            # Cập nhật giá trị hợp lệ gần nhất và giữ record nguyên trạng.
             for f in _FIELDS:
                 val = getattr(record, f)
                 if val is not None:
                     last_valid[f] = val
             result.append(_make_processed(record, vr, "valid", last_valid))
         else:
-            # Invalid record: substitute ALL fields with last known good values.
-            # Includes out_of_range non-None values — do not pass them downstream.
+            # Record lỗi: thay TẤT CẢ field bằng giá trị hợp lệ gần nhất.
+            # Kể cả giá trị out_of_range không None cũng không được đưa xuống dưới.
             effective = {f: last_valid[f] for f in _FIELDS}
             result.append(_make_processed(record, vr, "kept_last", effective))
 
@@ -163,16 +153,15 @@ def _apply_interpolate(
     records: Sequence[RawRecord],
     validations: Sequence[ValidationResult],
 ) -> list[ProcessedRecord]:
-    """Linear interpolation between adjacent valid values.
+    """Nội suy tuyến tính giữa các giá trị hợp lệ lân cận.
 
-    For each invalid record, ALL fields are interpolated between the last
-    and next valid values.  Out-of-range non-None values are discarded —
-    they are treated identically to missing (None) values for interpolation
-    purposes.  Falls back to keep_last if no next-valid exists.
+    Với mỗi record lỗi, mọi field được nội suy giữa giá trị hợp lệ trước và
+    sau. Giá trị vượt ngưỡng bị loại bỏ như missing value. Nếu không có giá trị
+    hợp lệ kế tiếp thì fallback về keep_last.
     """
     n = len(records)
 
-    # Precompute per-field: index of next valid-and-non-None source value
+    # Tính trước index của giá trị hợp lệ kế tiếp theo từng field.
     next_valid_idx: dict[str, list[int | None]] = {f: [None] * n for f in _FIELDS}
     for f in _FIELDS:
         nv: int | None = None
@@ -182,7 +171,7 @@ def _apply_interpolate(
             next_valid_idx[f][i] = nv
 
     last_valid_val: dict[str, float | None] = {f: None for f in _FIELDS}
-    # Track the record index of the last valid value per field for gap calculation
+    # Lưu index của giá trị hợp lệ gần nhất để tính khoảng nội suy.
     last_valid_idx: dict[str, int] = {f: -1 for f in _FIELDS}
     result: list[ProcessedRecord] = []
 
@@ -196,21 +185,20 @@ def _apply_interpolate(
             result.append(_make_processed(record, vr, "valid", last_valid_val))
             continue
 
-        # Invalid record: interpolate ALL fields regardless of raw value.
-        # Raw values are not trusted when vr.is_valid is False.
+        # Record lỗi: nội suy TẤT CẢ field, không tin raw value nữa.
         effective: dict[str, float | None] = {}
         for f in _FIELDS:
             lv = last_valid_val[f]
             nv_idx = next_valid_idx[f][i]
 
             if lv is None and nv_idx is None:
-                # No data on either side — keep None
+                # Không có dữ liệu hai phía thì giữ None.
                 effective[f] = None
             elif lv is None:
-                # No prior valid → borrow from the next valid record
+                # Không có giá trị trước đó thì mượn giá trị hợp lệ kế tiếp.
                 effective[f] = getattr(records[nv_idx], f)  # type: ignore[index]
             elif nv_idx is None:
-                # No next valid → fall back to last valid
+                # Không có giá trị kế tiếp thì fallback về last valid.
                 effective[f] = lv
             else:
                 nv = getattr(records[nv_idx], f)
@@ -231,12 +219,10 @@ def _apply_skip(
     records: Sequence[RawRecord],
     validations: Sequence[ValidationResult],
 ) -> list[ProcessedRecord]:
-    """Pass valid records through; set all effective values to None for invalid ones.
+    """Giữ record hợp lệ; set toàn bộ effective value thành None nếu record lỗi.
 
-    Skipped records expose ``None`` for every field so that the Kalman cycle
-    can detect them and skip the measurement-update step.  Out-of-range
-    non-None raw values are converted to ``None`` — they must not reach the
-    estimation pipeline.
+    Record skipped trả ``None`` cho mọi field để Kalman cycle nhận biết và bỏ
+    measurement-update. Giá trị raw vượt ngưỡng bị chuyển thành None.
     """
     result: list[ProcessedRecord] = []
     for record, vr in zip(records, validations):
@@ -244,13 +230,13 @@ def _apply_skip(
             effective = {f: getattr(record, f) for f in _FIELDS}
             result.append(_make_processed(record, vr, "valid", effective))
         else:
-            # Skipped: expose None for all fields regardless of raw values.
+            # Skipped: trả None cho mọi field, bất kể raw value là gì.
             effective = {f: None for f in _FIELDS}
             result.append(_make_processed(record, vr, "skipped", effective))
     return result
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+# Helpers.
 
 def _make_processed(
     record: RawRecord,
@@ -276,25 +262,24 @@ def preprocess_single(
     record: RawRecord,
     validation: ValidationResult,
 ) -> ProcessedRecord:
-    """Build a :class:`ProcessedRecord` for one record using skip policy.
+    """Tạo :class:`ProcessedRecord` cho một record bằng skip policy.
 
-    This is the correct policy for live sensor ingestion: if a reading is
-    invalid there is no historical context to interpolate from, so all
-    effective field values are set to ``None`` and the Kalman cycle skips
-    the measurement-update step.
+    Đây là policy phù hợp cho live sensor ingestion: nếu reading không hợp lệ
+    thì không có context tương lai để nội suy, nên toàn bộ effective field được
+    set None và Kalman cycle bỏ measurement-update.
 
-    Parameters
-    ----------
-    record:
-        Raw sensor record (single sample from a device).
-    validation:
-        Result of calling :func:`~validator.validate_record` on *record*.
-
-    Returns
+    Tham số
     -------
+    record:
+        Raw sensor record, tức một sample từ thiết bị.
+    validation:
+        Kết quả validate record.
+
+    Trả về
+    ------
     ProcessedRecord
-        ``preprocess_status="valid"`` when the reading passes validation;
-        ``preprocess_status="skipped"`` with all-``None`` effective values otherwise.
+        ``preprocess_status="valid"`` nếu reading pass validation; ngược lại
+        là ``preprocess_status="skipped"`` với effective value toàn None.
     """
     if validation.is_valid:
         effective: dict[str, float | None] = {f: getattr(record, f) for f in _FIELDS}

@@ -1,36 +1,29 @@
 """
-Per-record validation for greenhouse sensor data.
+Validation theo từng record cho dữ liệu sensor greenhouse.
 
-Validation is **stateless per record** except for suspicious-repeat detection,
-which requires a small window of previous values.  Callers that do not need
-repeat detection can pass an empty list for ``prev_records``.
+Validation gần như **stateless theo từng record**, ngoại trừ phát hiện
+suspicious-repeat cần một cửa sổ nhỏ các giá trị trước đó. Caller không cần
+repeat detection có thể truyền list rỗng cho ``prev_records``.
 
-Validation categories
----------------------
+Nhóm kết quả validation
+-----------------------
 VALID
-    All fields present and within plausible physical bounds.
+    Tất cả field có mặt và nằm trong ngưỡng vật lý hợp lý.
 MISSING
-    One or more numeric fields are ``None``.  This covers two source cases:
-    (a) the CSV cell was empty or absent, and (b) the CSV cell contained a
-    non-numeric string — both are normalised to ``None`` by the loader's
-    ``_to_float`` helper **before** reaching this validator.  In other words,
-    numeric parse errors are surfaced as ``status="missing"`` rather than a
-    separate malformed status.
+    Một hoặc nhiều field số là ``None``. Trường hợp này bao gồm ô CSV rỗng,
+    thiếu dữ liệu, hoặc chuỗi không parse được thành số.
 OUT_OF_RANGE
-    A numeric field is present but outside the configured physical bounds.
-    Non-finite values (NaN, Inf) are also reported as ``out_of_range``.
+    Field số có dữ liệu nhưng nằm ngoài ngưỡng vật lý đã cấu hình.
+    NaN/Inf cũng được báo là ``out_of_range``.
 SUSPICIOUS_REPEAT
-    The primary state variable (Soil_Moisture) has not changed for
-    ``repeat_threshold`` consecutive steps — likely a stuck sensor.
+    Biến chính Soil_Moisture không đổi trong ``repeat_threshold`` bước liên tiếp,
+    có thể là sensor bị kẹt.
 
-Note on malformed timestamps
------------------------------
-Rows with unparseable timestamps are **rejected by the loader** (logged and
-skipped) before any ``RawRecord`` is created.  Therefore this validator never
-receives a record with a missing timestamp and does not need a MALFORMED
-category.  Task #003 acceptance criterion "flags malformed" is satisfied by the
-combination of loader-level timestamp rejection and validator-level
-``status="missing"`` for non-parseable numeric cells.
+Ghi chú về timestamp lỗi
+------------------------
+Row có timestamp không parse được bị loader loại bỏ trước khi tạo ``RawRecord``.
+Vì vậy validator này không nhận record thiếu timestamp và không cần category
+MALFORMED riêng.
 """
 
 from __future__ import annotations
@@ -42,14 +35,14 @@ from typing import Sequence
 from .loader import RawRecord
 
 
-# ─── Configurable physical bounds ─────────────────────────────────────────────
+# Ngưỡng vật lý có thể cấu hình.
 
 @dataclass(frozen=True)
 class ValidationConfig:
-    """Physical bounds and repeat-detection settings.
+    """Ngưỡng vật lý và cấu hình phát hiện sensor lặp.
 
-    All bounds are inclusive.  Adjust per deployment if sensor characteristics
-    differ from the default greenhouse dataset.
+    Tất cả ngưỡng là inclusive. Có thể chỉnh theo deployment nếu đặc tính
+    sensor khác dataset greenhouse mặc định.
     """
 
     soil_moisture_min: float = 0.0
@@ -66,27 +59,27 @@ class ValidationConfig:
     mist_max: float = 1.0
     fan_min: float = 0.0
     fan_max: float = 1.0
-    # Number of consecutive identical Soil_Moisture values before flagging
+    # Số lần Soil_Moisture giống hệt liên tiếp trước khi bị flag.
     repeat_threshold: int = 10
 
 
 DEFAULT_CONFIG = ValidationConfig()
 
 
-# ─── Result type ──────────────────────────────────────────────────────────────
+# Kiểu kết quả validation.
 
 @dataclass(frozen=True)
 class ValidationResult:
-    """Outcome of validating a single :class:`~loader.RawRecord`."""
+    """Kết quả validate một :class:`~loader.RawRecord`."""
 
     is_valid: bool
     status: str          # one of VALID | MISSING | OUT_OF_RANGE | SUSPICIOUS_REPEAT
-    reason: str = ""     # human-readable explanation when not valid
+    reason: str = ""     # giải thích dễ đọc khi record không hợp lệ
 
 
-# ─── Validator ────────────────────────────────────────────────────────────────
+# Validator.
 
-# Mapping of field name → (min, max) for the _numeric_ fields we care about
+# Mapping field name -> (min, max) cho các field số cần kiểm tra.
 _RANGE_CHECKS: tuple[tuple[str, str, str], ...] = (
     # (field_attr, config_min_attr, config_max_attr)
     ("soil_moisture", "soil_moisture_min", "soil_moisture_max"),
@@ -104,24 +97,24 @@ def validate_record(
     prev_records: Sequence[RawRecord] | None = None,
     config: ValidationConfig = DEFAULT_CONFIG,
 ) -> ValidationResult:
-    """Validate a single record.
+    """Validate một record.
 
-    Parameters
-    ----------
-    record:
-        The record to validate.
-    prev_records:
-        Recent records preceding this one (most recent last).  Used only for
-        suspicious-repeat detection.  May be ``None`` or empty to skip that check.
-    config:
-        Physical bounds and thresholds.  Defaults to :data:`DEFAULT_CONFIG`.
-
-    Returns
+    Tham số
     -------
+    record:
+        Record cần validate.
+    prev_records:
+        Các record gần đây đứng trước record này. Chỉ dùng để phát hiện
+        suspicious-repeat; có thể là ``None`` hoặc rỗng để bỏ qua check này.
+    config:
+        Ngưỡng vật lý và threshold. Mặc định là :data:`DEFAULT_CONFIG`.
+
+    Trả về
+    ------
     ValidationResult
-        ``is_valid=True`` only when status is ``"valid"``.
+        ``is_valid=True`` chỉ khi status là ``"valid"``.
     """
-    # ── 1. Missing-value check ─────────────────────────────────────────────
+    # 1. Kiểm tra missing value.
     missing = [
         attr
         for attr, _, _ in _RANGE_CHECKS
@@ -134,7 +127,7 @@ def validate_record(
             reason=f"None value(s) for: {', '.join(missing)}",
         )
 
-    # ── 2. NaN / Inf guard ────────────────────────────────────────────────
+    # 2. Chặn NaN / Inf.
     not_finite = [
         attr
         for attr, _, _ in _RANGE_CHECKS
@@ -147,7 +140,7 @@ def validate_record(
             reason=f"Non-finite value(s) for: {', '.join(not_finite)}",
         )
 
-    # ── 3. Range check ────────────────────────────────────────────────────
+    # 3. Kiểm tra ngưỡng vật lý.
     out_of_range = []
     for attr, min_attr, max_attr in _RANGE_CHECKS:
         val: float = getattr(record, attr)  # type: ignore[assignment]
@@ -164,13 +157,12 @@ def validate_record(
             reason="; ".join(out_of_range),
         )
 
-    # ── 4. Suspicious-repeat check (Soil_Moisture only) ───────────────────
+    # 4. Kiểm tra suspicious-repeat, chỉ áp dụng cho Soil_Moisture.
     if prev_records and len(prev_records) >= config.repeat_threshold - 1:
         window = list(prev_records[-(config.repeat_threshold - 1) :])
         current_sm = record.soil_moisture
-        # Count only records that carry a real Soil_Moisture reading.
-        # A window of [None, 55] should NOT count as two comparable values —
-        # that would cause false positives when missing records appear in the run.
+        # Chỉ đếm record có Soil_Moisture thật. Window [None, 55] không được
+        # tính là hai giá trị có thể so sánh, tránh false positive khi có missing.
         comparable = [r for r in window if r.soil_moisture is not None]
         if (
             len(comparable) >= config.repeat_threshold - 1
@@ -192,40 +184,37 @@ def validate_live_record(
     record: RawRecord,
     config: ValidationConfig = DEFAULT_CONFIG,
 ) -> ValidationResult:
-    """Validate a single live sensor record with relaxed missing-value rules.
+    """Validate một live sensor record với rule missing-value thoáng hơn.
 
-    Unlike :func:`validate_record`, which requires **all** numeric fields to be
-    present (reflecting the offline CSV contract), this function treats ancillary
-    channels (temperature, humidity, light, drip, mist, fan) as optional.
+    Khác với :func:`validate_record` yêu cầu **tất cả** field số phải có mặt,
+    hàm này xem các kênh phụ như temperature, humidity, light, drip, mist, fan
+    là optional.
 
     Rules
     -----
-    * ``soil_moisture`` is the **primary channel**: when it is ``None`` the
-      function returns ``is_valid=False`` with ``status="missing"`` so that
-      :func:`~preprocessor.preprocess_single` produces
-      ``preprocess_status="skipped"`` (consistent with the offline path).
-    * Ancillary fields (temperature, humidity, light, drip, mist, fan) are
-      optional.  A ``None`` ancillary value is silently accepted.
-    * A field that IS present must be finite and within the configured physical
-      bounds; otherwise the record is ``"out_of_range"``.
+    * ``soil_moisture`` là **kênh chính**: nếu là ``None`` thì trả
+      ``is_valid=False`` với ``status="missing"`` để bước preprocess tạo
+      ``preprocess_status="skipped"``.
+    * Các kênh phụ có thể thiếu; giá trị ``None`` được chấp nhận.
+    * Field nào có mặt thì bắt buộc hữu hạn và nằm trong ngưỡng vật lý.
 
-    This function intentionally does **not** perform suspicious-repeat
-    detection — a live path typically has no preceding history at hand.
+    Hàm này cố ý **không** detect suspicious-repeat vì live path thường không
+    có đủ history phía trước tại thời điểm validate.
 
     Parameters
     ----------
     record:
-        Live sensor record to validate.
+        Live sensor record cần validate.
     config:
-        Physical bounds.  Defaults to :data:`DEFAULT_CONFIG`.
+        Ngưỡng vật lý. Mặc định là :data:`DEFAULT_CONFIG`.
 
     Returns
     -------
     ValidationResult
-        ``is_valid=True`` only when ``soil_moisture`` is present *and* all
-        present fields are finite and in-range.
+        ``is_valid=True`` chỉ khi ``soil_moisture`` có mặt và mọi field có mặt
+        đều hữu hạn, nằm trong ngưỡng.
     """
-    # Primary-channel guard: no measurement → Kalman cannot update → skip.
+    # Guard cho kênh chính: không có measurement thì Kalman không update được.
     if record.soil_moisture is None:
         return ValidationResult(
             is_valid=False,
@@ -237,7 +226,7 @@ def validate_live_record(
     for attr, min_attr, max_attr in _RANGE_CHECKS:
         val = getattr(record, attr)
         if val is None:
-            continue  # absent ancillary field — acceptable for live
+            continue  # kênh phụ vắng mặt được chấp nhận trong live path
         if not math.isfinite(val):
             out_of_range.append(f"{attr} is non-finite ({val!r})")
             continue
@@ -260,27 +249,23 @@ def validate_batch(
     records: Sequence[RawRecord],
     config: ValidationConfig = DEFAULT_CONFIG,
 ) -> list[ValidationResult]:
-    """Validate a sequence of records with rolling repeat-detection context.
+    """Validate một sequence records với context rolling để phát hiện repeat.
 
-    Each record is validated with a sliding window of **all** preceding records
-    (not only valid ones).  The repeat-detection logic inside
-    :func:`validate_record` already filters out ``None`` Soil_Moisture values
-    when counting comparable samples, so including invalid rows in the history
-    is intentional: a row that is invalid for a *different* reason (e.g.
-    temperature out of range) still carries a real Soil_Moisture reading that
-    contributes to stuck-sensor detection.
+    Mỗi record được validate với sliding window gồm **tất cả** record trước đó,
+    không chỉ record valid. Logic repeat bên trong :func:`validate_record`
+    đã tự lọc ``None`` Soil_Moisture khi đếm sample so sánh được.
 
     Parameters
     ----------
     records:
-        Records to validate (in chronological order).
+        Records cần validate theo thứ tự thời gian.
     config:
-        Validation configuration.
+        Cấu hình validation.
 
     Returns
     -------
     list[ValidationResult]
-        One result per input record, in the same order.
+        Một kết quả cho mỗi input record, cùng thứ tự.
     """
     results: list[ValidationResult] = []
     history: list[RawRecord] = []
@@ -288,7 +273,7 @@ def validate_batch(
     for record in records:
         result = validate_record(record, prev_records=history, config=config)
         results.append(result)
-        # Grow the sliding context window (all records, valid or not)
+        # Mở rộng context window bằng tất cả record, dù valid hay không.
         history.append(record)
         if len(history) > config.repeat_threshold:
             history.pop(0)

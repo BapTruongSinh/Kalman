@@ -1,19 +1,20 @@
 """
-Django settings for the Adaptive Kalman pipeline backend.
+Cấu hình Django cho backend Adaptive Kalman pipeline.
 
-Usage
------
-- Copy ``.env.example`` to ``.env`` and set ``DJANGO_SECRET_KEY``, DB_* variables.
-- **Local / v1 demo**: ``DJANGO_ENV=development`` (default) — DEBUG on, permissive CORS,
-  dashboard API defaults to **AllowAny** unless ``DASHBOARD_REQUIRE_AUTH`` is set.
-- **Production / v2 public**: ``DJANGO_ENV=production`` — ``DJANGO_SECRET_KEY`` is
-  **mandatory**; dashboard read endpoints default to **IsAuthenticated** unless you
-  set ``DASHBOARD_REQUIRE_AUTH=false`` explicitly (e.g. internal-only network).
+Cách dùng
+---------
+- Copy ``.env.example`` thành ``.env`` rồi điền ``DJANGO_SECRET_KEY`` và các biến DB_*.
+- **Local / demo v1**: ``DJANGO_ENV=development`` (mặc định) - bật DEBUG,
+  CORS thoáng hơn; dashboard API mặc định **AllowAny** nếu không đặt
+  ``DASHBOARD_REQUIRE_AUTH``.
+- **Production / public v2**: ``DJANGO_ENV=production`` - bắt buộc có
+  ``DJANGO_SECRET_KEY``; các API đọc cho dashboard mặc định **IsAuthenticated**
+  trừ khi chủ động đặt ``DASHBOARD_REQUIRE_AUTH=false``.
 
-Verification::
+Kiểm tra::
 
     python manage.py check
-    python manage.py check --deploy   # use with DJANGO_ENV=production + real secret
+    python manage.py check --deploy   # dùng với DJANGO_ENV=production + secret thật
 """
 
 import os
@@ -24,13 +25,13 @@ from django.core.exceptions import ImproperlyConfigured
 
 
 def _split_csv_or_whitespace(value: str) -> list[str]:
-    """Split env lists on commas and/or whitespace (backward-compatible)."""
+    """Tách danh sách env bằng dấu phẩy hoặc khoảng trắng để tương thích ngược."""
     return [p.strip() for p in re.split(r"[\s,]+", value.strip()) if p.strip()]
 
-# --- Paths ---
+# --- Đường dẫn ---
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load .env when present (development).
+# Load .env nếu có, thường dùng khi chạy development.
 try:
     from dotenv import load_dotenv  # type: ignore[import-untyped]
 
@@ -38,11 +39,11 @@ try:
 except ImportError:
     pass
 
-# --- Environment ---
+# --- Môi trường ---
 DJANGO_ENV = os.environ.get("DJANGO_ENV", "development").strip().lower()
 IS_PRODUCTION = DJANGO_ENV == "production"
 
-# --- Security: SECRET_KEY & DEBUG ---
+# --- Bảo mật: SECRET_KEY & DEBUG ---
 if IS_PRODUCTION:
     _secret = os.environ.get("DJANGO_SECRET_KEY", "").strip()
     if not _secret:
@@ -68,7 +69,7 @@ ALLOWED_HOSTS = [
     if h.strip()
 ]
 
-# Production HTTPS / cookies (tunable for reverse-proxy setups)
+# HTTPS / cookie cho production, có thể chỉnh khi chạy sau reverse proxy.
 if IS_PRODUCTION:
     _truthy = ("1", "true", "yes")
 
@@ -108,7 +109,7 @@ if IS_PRODUCTION:
     if _csrf_origins:
         CSRF_TRUSTED_ORIGINS = _split_csv_or_whitespace(_csrf_origins)
 
-# --- Applications ---
+# --- Ứng dụng ---
 INSTALLED_APPS = [
     "django.contrib.contenttypes",
     "django.contrib.auth",
@@ -120,7 +121,7 @@ INSTALLED_APPS = [
     "estimation",
 ]
 
-# --- Middleware (SecurityMiddleware + CSRF + X-Frame + auth chain) ---
+# --- Middleware: bảo mật, CORS, session, CSRF, auth, X-Frame ---
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -135,7 +136,7 @@ MIDDLEWARE = [
 ROOT_URLCONF = "config.urls"
 
 # --- Django REST Framework ---
-# Default: require auth on dashboard GET APIs in production only (fail-safe deploy).
+# Mặc định chỉ bắt auth cho dashboard GET API khi ở production.
 _dash_auth_raw = os.environ.get("DASHBOARD_REQUIRE_AUTH")
 if _dash_auth_raw is None:
     _REQUIRE_AUTH = IS_PRODUCTION
@@ -167,7 +168,7 @@ if _cors_origins:
 else:
     CORS_ALLOW_ALL_ORIGINS = DEBUG
 
-# --- Sessions (required for SessionAuthentication / admin / future dashboard login) ---
+# --- Session: cần cho SessionAuthentication / admin / login dashboard sau này ---
 SESSION_ENGINE = "django.contrib.sessions.backends.db"
 
 # --- Database ---
