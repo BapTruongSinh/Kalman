@@ -6,6 +6,7 @@
 
 - V2 CLI `python -m mpc simulate` để so sánh MPC với threshold baseline và ghi JSON report.
 - V2 CLI `python -m mpc recommend` để đọc state JSON và ghi recommendation JSON.
+- V2 validation gate reference and expanded pytest coverage for config, CLI errors, and simulation regression.
 
 ### Fixed
 

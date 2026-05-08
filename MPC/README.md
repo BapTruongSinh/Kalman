@@ -57,7 +57,7 @@ MPC/
     plan/
 ```
 
-Task #001 đã chốt package architecture và config contract. Task #002 đã tạo config/state contracts và ARX plant adapter. Task #003 đã tạo recommendation output, cost scoring, và deterministic beam-grid solver. Task #004 đã tạo CLI `simulate`/`recommend` và baseline simulation report.
+Task #001 đã chốt package architecture và config contract. Task #002 đã tạo config/state contracts và ARX plant adapter. Task #003 đã tạo recommendation output, cost scoring, và deterministic beam-grid solver. Task #004 đã tạo CLI `simulate`/`recommend` và baseline simulation report. Task #005 đã mở rộng validation/test suite cho v2.
 
 ---
 
@@ -77,7 +77,10 @@ V3 `adaptive-simulate` và `closed-loop` thuộc task sau.
 
 ```powershell
 python -m pytest MPC/tests -q
+python -m compileall -q MPC/mpc
 ```
+
+Validation gate chi tiết nằm trong [`docs/technical/VALIDATION.md`](docs/technical/VALIDATION.md).
 
 ---
 
@@ -93,6 +96,6 @@ python -m pytest MPC/tests -q
 
 ## Status
 
-Current: task #004 added `python -m mpc simulate` and `python -m mpc recommend`, including threshold baseline comparison and JSON report metrics.
+Current: task #005 added expanded config, CLI error, simulation regression, and validation-gate coverage for v2.
 
-Core runtime bắt đầu từ task #002; solver/recommendation đã có ở task #003; CLI/simulation đã có ở task #004; v3 adaptive/closed-loop tiếp tục ở task #006/#007.
+Core runtime bắt đầu từ task #002; solver/recommendation đã có ở task #003; CLI/simulation đã có ở task #004; v2 validation suite đã có ở task #005; v3 adaptive/closed-loop tiếp tục ở task #006/#007.

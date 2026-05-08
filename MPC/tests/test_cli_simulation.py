@@ -212,6 +212,66 @@ def test_cli_recommend_invalid_state_exits_nonzero(tmp_path: Path) -> None:
     assert not output_path.exists()
 
 
+def test_cli_recommend_missing_artifact_exits_nonzero(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    output_path = tmp_path / "recommendation.json"
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    state_path.write_text(
+        json.dumps(
+            {
+                "timestamp": now.isoformat(),
+                "kf_x_posterior": 54.0,
+                "temperature": 27.0,
+                "humidity": 72.0,
+                "light": 300.0,
+                "last_pump_seconds": 0.0,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = _run_cli(
+        "recommend",
+        "--artifact",
+        str(tmp_path / "missing_arx_model.json"),
+        "--state-json",
+        str(state_path),
+        "--output",
+        str(output_path),
+    )
+
+    assert result.returncode == 2
+    assert "ARX artifact not found" in result.stderr
+    assert not output_path.exists()
+
+
+def test_cli_simulate_invalid_config_exits_nonzero(tmp_path: Path) -> None:
+    artifact = _artifact(tmp_path)
+    csv_path = _csv(tmp_path)
+    config_path = tmp_path / "bad_config.json"
+    output_path = tmp_path / "report.json"
+    config_path.write_text(
+        json.dumps({"pump": {"grid_seconds": 301.0}}),
+        encoding="utf-8",
+    )
+
+    result = _run_cli(
+        "simulate",
+        "--artifact",
+        str(artifact),
+        "--input",
+        str(csv_path),
+        "--output",
+        str(output_path),
+        "--config",
+        str(config_path),
+    )
+
+    assert result.returncode == 2
+    assert "pump.grid_seconds" in result.stderr
+    assert not output_path.exists()
+
+
 def _run_cli(*args: str) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1])

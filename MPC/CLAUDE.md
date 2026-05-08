@@ -50,11 +50,11 @@ Mọi task phải có checklist `## Completion Gates` trong `.tasks/NNN-*.md`:
 
 ## Environment & Commands
 
-Current package status: task #004 added importable `mpc` modules for config, state/history, ARX plant adapter, recommendation output, cost scoring, deterministic beam-grid shooting solver, simulation report, and CLI `simulate`/`recommend`.
+Current package status: task #005 added importable `mpc` modules for config, state/history, ARX plant adapter, recommendation output, cost scoring, deterministic beam-grid shooting solver, simulation report, CLI `simulate`/`recommend`, and expanded v2 validation tests.
 
 Current solver note: solver is deterministic beam-grid shooting with fail-closed validation. V2 CLI commands run without Django/database.
 
-Hiện tại `MPC/` đã có core package Python cho config/state/plant adapter, recommendation output, cost scoring, deterministic beam-grid solver, simulation report, và CLI `simulate`/`recommend`.
+Hiện tại `MPC/` đã có core package Python cho config/state/plant adapter, recommendation output, cost scoring, deterministic beam-grid solver, simulation report, CLI `simulate`/`recommend`, và validation suite v2.
 
 - **Run tests**: `python -m pytest MPC/tests -q`
 - **V2 simulate**: `cd MPC; python -m mpc simulate --artifact ../ARX/arx_model.json --input ../ARX/greenhouse_data.csv --output reports/v2_simulation.json --max-steps 288`
@@ -74,6 +74,7 @@ Hiện tại `MPC/` đã có core package Python cho config/state/plant adapter,
 @MPC/docs/technical/CONFIG.md
 @MPC/docs/technical/API.md
 @MPC/docs/technical/DATABASE.md
+@MPC/docs/technical/VALIDATION.md
 @MPC/docs/technical/CODEBASE_ONBOARDING.md
 @MPC/docs/plan/2026-05-08-mpc-v2-ampc-v3.md
 @Kalman/docs/technical/CODEBASE_ONBOARDING.md

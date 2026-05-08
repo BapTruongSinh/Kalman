@@ -146,8 +146,14 @@ def controller_config_from_mapping(
     safety_raw = _mapping_or_empty(payload.get("safety"), "safety")
 
     return ControllerConfig(
-        step_seconds=int(payload.get("step_seconds", 300)),
-        horizon_steps=int(payload.get("horizon_steps", 12)),
+        step_seconds=_strict_int(
+            payload.get("step_seconds", 300),
+            "step_seconds",
+        ),
+        horizon_steps=_strict_int(
+            payload.get("horizon_steps", 12),
+            "horizon_steps",
+        ),
         target_band=TargetBand(
             low=float(target_raw.get("low", 55.0)),
             high=float(target_raw.get("high", 65.0)),
@@ -169,8 +175,9 @@ def controller_config_from_mapping(
         safety=SafetyConfig(
             state_min=float(safety_raw.get("state_min", 0.0)),
             state_max=float(safety_raw.get("state_max", 100.0)),
-            stale_after_seconds=int(
-                safety_raw.get("stale_after_seconds", 600)
+            stale_after_seconds=_strict_int(
+                safety_raw.get("stale_after_seconds", 600),
+                "safety.stale_after_seconds",
             ),
             soft_daily_pump_cap_seconds=float(
                 safety_raw.get("soft_daily_pump_cap_seconds", 1800.0)
@@ -198,4 +205,10 @@ def _mapping_or_empty(value: Any, field_name: str) -> Mapping[str, Any]:
         return {}
     if not isinstance(value, Mapping):
         raise ValueError(f"{field_name} must be an object")
+    return value
+
+
+def _strict_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field_name} must be an integer")
     return value
