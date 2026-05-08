@@ -1,13 +1,13 @@
-# [Project Name] — Claude Instructions
+# demo_kalman — Claude Instructions
 
-> Stack: [e.g., Next.js 14 · TypeScript · PostgreSQL · Prisma · Railway]
-> Last updated: [YYYY-MM-DD]
+> Stack: Python · Django · MySQL · React/Vite · ARX artifact · MPC/AMPC controller
+> Last updated: 2026-05-08
 
 ## Project Context
 
-[2–3 sentences: what this product does, who it serves, and the core problem it solves.]
+This repository contains a smart greenhouse research/demo system. `Kalman/` is the live estimator application that ingests sensor samples, uses the ARX artifact as a prior, runs Adaptive Kalman filtering, stores MySQL traces, and serves the dashboard. `MPC/` is the standalone controller project for v2 MPC recommendations and v3 AMPC/closed-loop pilot work.
 
-**Tech stack summary**: [Frontend] · [Backend] · [Database] · [Hosting]
+**Tech stack summary**: React + Vite dashboard · Django REST backend · MySQL/XAMPP local DB · Python ARX/MPC tooling · AWS target deferred
 
 ---
 
@@ -29,21 +29,23 @@
 
 These apply to all agents at all times. No exceptions without explicit human instruction.
 
-0. **Project target directory is `Kalman/`.** Use `Kalman/` as the working project root for code, project docs, backlog, and task files. Use sibling `ARX/` as read-only ARX model/dataset context unless the human explicitly asks to change it. Use `.claude/` only for agent/template management.
-1. **`Kalman/PRD.md` requires explicit human approval to modify.** Do not edit it unless the human has clearly instructed you to do so in the current conversation. Read it to understand requirements.
-2. **`Kalman/TODO.md` is the living backlog.** Agents may add items, mark items complete, and move items to "Completed". Preserve section order and existing item priority — do not reorder items within a section unless explicitly asked to reprioritize.
+0. **Project target directories are `Kalman/` and `MPC/`.** Use `Kalman/` for the live estimator/backend/dashboard. Use `MPC/` for the standalone controller project, MPC/AMPC docs, backlog, and future controller code. Use sibling `ARX/` as read-only ARX model/dataset context unless the human explicitly asks to change it. Use `.claude/` only for agent/template management.
+1. **Project PRDs require explicit human approval to modify.** Do not edit `Kalman/PRD.md` or `MPC/PRD.md` unless the human has clearly instructed you to do so in the current conversation. Read the relevant PRD to understand requirements.
+2. **Project TODO files are living backlogs.** Use `Kalman/TODO.md` for estimator/backend/dashboard work and `MPC/TODO.md` for controller work. Agents may add items, mark items complete, and move items to "Completed". Preserve section order and existing item priority — do not reorder items within a section unless explicitly asked to reprioritize.
 3. **All commits use Conventional Commits format** (see Git Conventions below).
-4. **Update the relevant `Kalman/docs/` file** after every significant change before marking a task complete.
+4. **Update the relevant project docs** after every significant change before marking a task complete: `Kalman/docs/` for estimator work, `MPC/docs/` for controller work.
 5. **Run tests before marking any implementation task complete.**
 6. **Never hardcode secrets, credentials, or environment-specific values** in source code.
-7. **Consult `Kalman/docs/technical/DECISIONS.md`** before proposing changes that may conflict with prior architectural decisions.
+7. **Consult the relevant `DECISIONS.md`** before proposing changes that may conflict with prior architectural decisions: `Kalman/docs/technical/DECISIONS.md` or `MPC/docs/technical/DECISIONS.md`.
 8. **Always delegate to the right specialist.** If a task touches application code (frontend, mobile, backend, or database), design/UX/content, testing/documentation, or infrastructure — invoke the appropriate agent (`builder`, `designer`, `quality`, or `infra`) immediately. Do not implement it yourself. The delegation table above is binding, not advisory.
 9. **Commit your own changes; never push.** After completing your work, create a local commit (Conventional Commits format). Do not `git push`. The orchestrator is responsible for pushing the branch and opening the PR.
 10. **When invoking `builder`, specify the domain in your request** (e.g. "frontend task — add dark mode toggle" or "database task — add index on orders table"). The builder reads the corresponding skill before starting work.
-11. **Read rules and review memory before every new prompt/task.** Before any action or answer, read `.claude/.claude/rules/`, then `.claude/.claude/review/REVIEW.md`, then relevant `Kalman/TODO.md` and `Kalman/.tasks/` files.
-12. **`Kalman/TODO.md` is the task source of truth.** Use `Kalman/TODO.md` and matching `Kalman/.tasks/NNN-*.md` files for task tracking. Do not require a plan/discussion workflow or human plan-approval gate before creating or updating tasks unless the human explicitly asks for that workflow.
+11. **Read rules, review memory, and codebase onboarding before every new prompt/task.** Before any action or answer, read `.claude/.claude/rules/`, then `.claude/.claude/review/REVIEW.md`, then the relevant onboarding file: `Kalman/docs/technical/CODEBASE_ONBOARDING.md` for estimator/backend/dashboard or `MPC/docs/technical/CODEBASE_ONBOARDING.md` for controller work, then the matching TODO and `.tasks/` files.
+12. **Project TODO files are the task source of truth.** Use `Kalman/TODO.md` + `Kalman/.tasks/NNN-*.md` for Kalman work, and `MPC/TODO.md` + `MPC/.tasks/NNN-*.md` for MPC/AMPC controller work. Do not require a plan/discussion workflow or human plan-approval gate before creating or updating tasks unless the human explicitly asks for that workflow.
 13. **Review memory after every prompt/window/task.** At the end of each prompt, work window, or task, append a concise entry to `.claude/.claude/review/REVIEW.md` with files changed, verification, residual risk, and next step.
 14. **Current project direction is Adaptive Kalman + AMPC.** Do not reduce the project back to baseline Kalman + fixed MPC. Use ARX as the first prediction baseline, keep prediction/estimator modules replaceable, and preserve AMPC state/control/disturbance/cost/safety contracts in docs and task design.
+15. **Combine skills when that improves the work.** Prefer project-local skills under `.claude/` when there is overlap, but you may combine them with skills from `C:\Users\ADMIN\.codex\skills` and `C:\Users\ADMIN\.agents\skills` when those external skills are stronger or complementary. If multiple skills fit and can work together, combine them rather than forcing a single-skill path. For code understanding, tracing, or architecture analysis before changes, you may additionally use `C:\Users\ADMIN\.agents\skills\understand` and `C:\Users\ADMIN\.agents\skills\understand-explain`.
+16. **Update `CODEBASE_ONBOARDING.md` only after user review approval.** Use the relevant onboarding file as mandatory preflight context before implementation, but after coding, wait until the user reviews and confirms OK before documenting accepted flow changes there.
 
 ---
 
@@ -88,18 +90,20 @@ Rules in `.claude/rules/` inject context automatically based on the file being e
 ## Project Structure
 
 ```
-Kalman/                 # Project target directory: code, docs, backlog, tasks
-  src/                  # Application source code
-  app/                  # [e.g., Next.js App Router pages]
-  components/           # Shared UI components
-  lib/                  # Utilities, helpers, shared logic
-  tests/
-    e2e/                # Playwright E2E tests (*.spec.ts)
+Kalman/                 # Live estimator/backend/dashboard project
+  backend/              # Django backend, MySQL models, live ingestion, Kalman/ARX runtime
+  dashboard/            # React + Vite dashboard
   docs/
     user/USER_GUIDE.md  # User-facing documentation
     technical/          # Architecture, API, DB, decisions, design system
     content/            # Content strategy, brand voice, keyword targets
   .tasks/               # Detailed task files — one per TODO item or task group
+MPC/                    # Controller project: MPC/AMPC docs, backlog, future Python package and CLI
+  docs/
+  .tasks/
+  PRD.md
+  TODO.md
+  CLAUDE.md
 ARX/                    # ARX model/dataset context for Kalman implementation
 .claude/
   agents/               # Specialist agent definitions
@@ -157,42 +161,33 @@ refactor/<description>
 
 ## Code Style
 
-> Fill in when project tooling is set up.
-
-- **Language**: TypeScript (strict mode)
-- **Formatter**: [Prettier — config in `.prettierrc`]
-- **Linter**: [ESLint — config in `.eslintrc`]
-- **Import style**: [absolute imports from `src/`]
-- **No `console.log`** in production code — use the project logger utility
-- **No commented-out code** committed — delete it or track it in `Kalman/TODO.md`
+- **Backend/MPC language**: Python 3, typed dataclasses where useful, explicit error handling.
+- **Dashboard language**: TypeScript with React + Vite.
+- **Formatter/linter**: follow existing project tooling in each subproject; do not introduce a new formatter without a task.
+- **Import style**: keep imports local and explicit; avoid hidden coupling between `Kalman/`, `MPC/`, and `ARX/`.
+- **No hardcoded secrets** in source, tests, docs, or review memory.
+- **No commented-out code** committed — delete it or track it in the relevant project TODO.
 
 ---
 
 ## Testing Conventions
 
-> Fill in when test infrastructure is set up.
-
-- **Unit tests**: [Vitest — colocated as `*.test.ts` next to source files]
-- **E2E tests**: [Playwright — in `tests/e2e/*.spec.ts`]
-- **Run unit**: `[npm test]`
-- **Run E2E**: `[npm run test:e2e]`
-- **Coverage target**: 80% for new features
-- E2E tests use Page Object Model pattern and `data-testid` selectors
+- **Kalman backend**: `cd Kalman/backend; python -m pytest estimation/tests -q`.
+- **Kalman Django checks**: `python manage.py check`, `python manage.py makemigrations --check --dry-run`, `python manage.py migrate --check`.
+- **Kalman dashboard**: `cd Kalman/dashboard; npm test -- --run; npm run build`.
+- **MPC controller**: `python -m pytest MPC/tests -q` after runtime package exists.
+- **Completion gates**: each task must pass Logic, Nghiệp vụ, Security, and Test chạy thực tế gates before completion.
 
 ---
 
 ## Environment & Commands
 
-> Fill in when project is initialized.
-
-- **Node**: [x.x.x] (see `.nvmrc`)
-- **Package manager**: [npm / pnpm / yarn]
-- `[npm run dev]` — start dev server
-- `[npm run build]` — production build
-- `[npm test]` — unit tests
-- `[npm run test:e2e]` — E2E tests
-- `[npm run lint]` — lint check
-- `[npm run typecheck]` — TypeScript check
+- **Kalman backend dev**: `cd Kalman/backend; python manage.py runserver`.
+- **Kalman backend tests**: `cd Kalman/backend; python -m pytest estimation/tests -q`.
+- **Kalman dashboard dev**: `cd Kalman/dashboard; npm run dev`.
+- **Kalman dashboard tests/build**: `npm test -- --run`; `npm run build`.
+- **MPC tests target**: `python -m pytest MPC/tests -q`.
+- **Database**: MySQL/XAMPP for Kalman runtime; no SQLite override.
 
 ---
 
@@ -202,7 +197,15 @@ refactor/<description>
 @Kalman/docs/technical/DESIGN_SYSTEM.md
 @Kalman/docs/technical/DECISIONS.md
 @Kalman/docs/technical/ONBOARDING_ANSWERS.md
+@Kalman/docs/technical/CODEBASE_ONBOARDING.md
 @Kalman/docs/technical/ADAPTIVE_KALMAN_AMPC_NOTES.md
 @Kalman/docs/technical/API.md
 @Kalman/docs/technical/DATABASE.md
 @Kalman/docs/user/USER_GUIDE.md
+@MPC/PRD.md
+@MPC/TODO.md
+@MPC/docs/technical/ONBOARDING_ANSWERS.md
+@MPC/docs/technical/CODEBASE_ONBOARDING.md
+@MPC/docs/technical/ARCHITECTURE.md
+@MPC/docs/technical/DECISIONS.md
+@MPC/docs/technical/CONFIG.md

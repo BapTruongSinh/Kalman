@@ -23,23 +23,36 @@
 
 ## Rule bổ sung về nguồn gốc task
 
-1. `Kalman/TODO.md` là nguồn task chính của dự án.
-2. Mỗi task được theo dõi bằng item trong `Kalman/TODO.md` và file chi tiết tương ứng trong `Kalman/.tasks/` khi cần.
+1. `Kalman/TODO.md` là nguồn task chính của estimator/backend/dashboard; `MPC/TODO.md` là nguồn task chính của controller MPC/AMPC.
+2. Mỗi task được theo dõi bằng item trong TODO của project tương ứng và file chi tiết trong `.tasks/` của project đó khi cần.
 3. Không yêu cầu tạo plan/discussion workflow hoặc chờ user duyệt plan trước khi tạo/cập nhật task, trừ khi user yêu cầu rõ workflow đó.
 
 ## Mapping skill tối thiểu theo nhóm việc
 
-- Lập kế hoạch nếu user yêu cầu rõ:
+- Mỗi task file nên có frontmatter `required_skills`. Ưu tiên skill local trong `.claude/.claude/skills/` khi có, sau đó mới dùng skill hệ thống.
+
+- Lập kế hoạch / backlog / ADR:
+  - `planning`
+  - `docs` nếu có cập nhật tài liệu
   - `writing-plans`
 - Backend Django/Python:
+  - `backend`
+  - `quality` nếu task yêu cầu test
   - `django-pro`
   - `python-pro`
   - `backend-dev-guidelines`
+- Controller MPC/AMPC:
+  - `planning` cho thiết kế package/config
+  - `backend` cho solver/adapter/actuator
+  - `quality` cho test/simulation/validation
+  - `docs` cho guide/onboarding/ADR
 - Kiểm tra security:
   - `backend-security-coder`
 - Kiểm tra test:
+  - `quality`
   - `python-testing-patterns`
 - Kiểm tra logic/kiến trúc:
+  - `planning`
   - `software-architecture`
 
 ## Tiêu chí pass cho 4 cổng

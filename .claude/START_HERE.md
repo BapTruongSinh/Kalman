@@ -10,7 +10,9 @@
 
 When the user says **"START!"**, execute this onboarding sequence in full. Do not wait for further instructions — begin immediately. Do not skip phases or merge them.
 
-**Repository-specific target directory**: In this checkout, the project implementation root is `Kalman/`. Resolve project files such as `README.md`, `CLAUDE.md`, `PRD.md`, `TODO.md`, `.tasks/`, and `docs/` under `Kalman/`. The sibling `ARX/` folder is context for the ARX prediction model and dataset. The `.claude/` folder is agent/template management only.
+**Repository-specific target directories**: In this checkout, `Kalman/` is the live estimator/backend/dashboard project root, and `MPC/` is the standalone controller project root. Resolve project files such as `README.md`, `CLAUDE.md`, `PRD.md`, `TODO.md`, `.tasks/`, and `docs/` under the target project named by the user. The sibling `ARX/` folder is context for the ARX prediction model and dataset. The `.claude/` folder is agent/template management only.
+
+In every step below, `{TARGET}` means the selected project root (`Kalman` or `MPC`). Do not hardcode `Kalman/` when the human asks to onboard or update `MPC/`.
 
 ---
 
@@ -63,23 +65,23 @@ Ask the user questions in conversational groups — 3 to 4 at a time. Wait for a
 Before filling in any documentation, copy the blank templates from `.claude/templates/` to their project locations:
 
 ```
-.claude/.claude/templates/docs/technical/ARCHITECTURE.md    →  Kalman/docs/technical/ARCHITECTURE.md
-.claude/.claude/templates/docs/technical/DESIGN_SYSTEM.md   →  Kalman/docs/technical/DESIGN_SYSTEM.md
-.claude/.claude/templates/docs/technical/DECISIONS.md       →  Kalman/docs/technical/DECISIONS.md
-.claude/.claude/templates/docs/technical/API.md             →  Kalman/docs/technical/API.md
-.claude/.claude/templates/docs/technical/DATABASE.md        →  Kalman/docs/technical/DATABASE.md
-.claude/.claude/templates/docs/user/USER_GUIDE.md           →  Kalman/docs/user/USER_GUIDE.md
-.claude/.claude/templates/docs/content/CONTENT_STRATEGY.md  →  Kalman/docs/content/CONTENT_STRATEGY.md
-.claude/.claude/templates/README.md                         →  Kalman/README.md  (the project README)
+.claude/.claude/templates/docs/technical/ARCHITECTURE.md    →  {TARGET}/docs/technical/ARCHITECTURE.md
+.claude/.claude/templates/docs/technical/DESIGN_SYSTEM.md   →  {TARGET}/docs/technical/DESIGN_SYSTEM.md
+.claude/.claude/templates/docs/technical/DECISIONS.md       →  {TARGET}/docs/technical/DECISIONS.md
+.claude/.claude/templates/docs/technical/API.md             →  {TARGET}/docs/technical/API.md
+.claude/.claude/templates/docs/technical/DATABASE.md        →  {TARGET}/docs/technical/DATABASE.md
+.claude/.claude/templates/docs/user/USER_GUIDE.md           →  {TARGET}/docs/user/USER_GUIDE.md
+.claude/.claude/templates/docs/content/CONTENT_STRATEGY.md  →  {TARGET}/docs/content/CONTENT_STRATEGY.md
+.claude/.claude/templates/README.md                         →  {TARGET}/README.md  (the project README)
 ```
 
 Create parent directories as needed. Do not modify the files inside `.claude/templates/` — they are the upstream originals.
 
-`Kalman/CLAUDE.md` and `Kalman/PRD.md` are already present in the project target directory and do not need copying.
+`{TARGET}/CLAUDE.md` and `{TARGET}/PRD.md` may already be present in the project target directory. If they are missing, copy them from `.claude/.claude/templates/` before filling them.
 
 Using the answers collected in Phase 1, update the following files in order. Replace every `[placeholder]` with real content. If the user doesn't know an answer yet, use `[TBD]` — never leave the original template placeholder text.
 
-**2.1 — `Kalman/CLAUDE.md`**
+**2.1 — `{TARGET}/CLAUDE.md`**
 
 - Project name (heading and context paragraph)
 - 2–3 sentence project context description
@@ -89,7 +91,7 @@ Using the answers collected in Phase 1, update the following files in order. Rep
 - Environment commands: dev, build, test, lint, typecheck
 - Stack line in the header
 
-**2.2 — `Kalman/README.md`** *(copied from `.claude/.claude/templates/README.md` in step 2.0)*
+**2.2 — `{TARGET}/README.md`** *(copied from `.claude/.claude/templates/README.md` in step 2.0 when missing)*
 
 - Project name and one-sentence description
 - Overview paragraphs (what it does, who it's for, why it exists)
@@ -97,7 +99,7 @@ Using the answers collected in Phase 1, update the following files in order. Rep
 - Getting Started: prerequisites, install steps, run commands
 - Environment variables table: list all known required vars with descriptions (no values)
 
-**2.3 — `Kalman/PRD.md`**
+**2.3 — `{TARGET}/PRD.md`**
 
 - Executive summary (3–5 sentences from the project description and goals)
 - Problem statement: current situation, the problem, why now
@@ -108,18 +110,18 @@ Using the answers collected in Phase 1, update the following files in order. Rep
 - Open questions: list any unresolved decisions from Group 5
 - Revision history: add a first entry with today's date
 
-**2.4 — `Kalman/docs/technical/ARCHITECTURE.md`**
+**2.4 — `{TARGET}/docs/technical/ARCHITECTURE.md`**
 
 - Tech stack table: fill in all layers with versions and brief rationale
 - Infrastructure environments table: at minimum, Production and Local rows
 - Leave the Frontend Architecture, Backend Architecture, and Data Flow sections as templates — they will be filled in as implementation progresses
 - The **Design system and UX** section only links to `DESIGN_SYSTEM.md` — do not duplicate tokens there
 
-**2.4b — `Kalman/docs/technical/DESIGN_SYSTEM.md`**
+**2.4b — `{TARGET}/docs/technical/DESIGN_SYSTEM.md`**
 
 - Leave token tables, component inventory, interaction patterns, and key user flows as templates — @ui-ux-designer fills these as the product UI evolves (parallel to how copy evolves in `CONTENT_STRATEGY.md`)
 
-**2.5 — `Kalman/docs/technical/DECISIONS.md`**
+**2.5 — `{TARGET}/docs/technical/DECISIONS.md`**
 
 Fill in ADR-001 with the initial tech stack decision:
 - Context: the project type, team size/familiarity, deployment constraints
@@ -129,7 +131,7 @@ Fill in ADR-001 with the initial tech stack decision:
 
 Update the Decision Index table with the ADR-001 row.
 
-**2.6 — `Kalman/docs/content/CONTENT_STRATEGY.md`** *(skip if the project has no public-facing pages — mark file as `[N/A — internal tool]` in that case)*
+**2.6 — `{TARGET}/docs/content/CONTENT_STRATEGY.md`** *(skip if the project has no public-facing pages — mark file as `[N/A — internal tool]` in that case)*
 
 Using the answers from Group 5:
 - Overview and primary value proposition: the one sentence that all copy must reinforce
@@ -148,7 +150,7 @@ This is a critical step. **The TODO.md must not be left with placeholder items.*
 
 #### 3.1 — Derive tasks from the PRD
 
-Read through the functional requirements in `Kalman/PRD.md` and break them down into concrete, implementable tasks. For each feature area, think through what needs to happen end-to-end:
+Read through the functional requirements in `{TARGET}/PRD.md` and break them down into concrete, implementable tasks. For each feature area, think through what needs to happen end-to-end:
 
 - Does it need a database schema? → task tagged `[area: database]`
 - Does it need an API endpoint? → task tagged `[area: backend]`
@@ -170,7 +172,7 @@ Read through the functional requirements in `Kalman/PRD.md` and break them down 
 
 For each task:
 
-**Step A — Add to `Kalman/TODO.md`** using this format:
+**Step A — Add to `{TARGET}/TODO.md`** using this format:
 ```
 - [ ] #NNN — Clear, outcome-focused description [area: tag] → [.tasks/NNN-short-title.md](.tasks/NNN-short-title.md)
 ```
@@ -179,20 +181,21 @@ Place it in the correct section:
 - **Up Next**: the first 3–5 tasks that are ready to start immediately, ordered by dependency and priority
 - **Backlog**: everything else, roughly ordered by when it will be needed
 
-**Step B — Create `Kalman/.tasks/NNN-short-title.md`** by copying `Kalman/.tasks/TASK_TEMPLATE.md`:
+**Step B — Create `{TARGET}/.tasks/NNN-short-title.md`** by copying `{TARGET}/.tasks/TASK_TEMPLATE.md`:
 - Rename the file to match the task number and a short kebab-case title (e.g., `003-user-auth-schema.md`)
 - Fill in all frontmatter fields:
-  - `id`, `title`, `status: "todo"`, `area`, `agent` (the specialist agent that will do this work)
+  - `id`, `title`, `status: "todo"`, `area`, `agent` (the specialist agent that will do this work), `required_skills`
   - `created_at` (today's date)
   - `prd_refs` — list the FR-XXX numbers this task satisfies
   - `blocks` and `blocked_by` — identify dependencies between tasks
   - `priority`: "high" for Up Next items, "normal" or "low" for Backlog
 - Write a detailed `## Description` — 2–5 sentences explaining what needs to be done and why
 - Write specific `## Acceptance Criteria` — testable statements that define "done"
+- Write `## Completion Gates` with Logic, Nghiệp vụ, Security, and Test chạy thực tế checks
 - Add any known `## Technical Notes` (relevant ADRs, schema dependencies, API contracts needed)
 - Add the creation entry to the `## History` table
 
-**Step C — Remove all remaining placeholder items** from `Kalman/TODO.md` (the `#001` through `#008` entries that shipped with the template). Replace them entirely with the real tasks derived from the PRD. Do not keep placeholder entries.
+**Step C — Remove all remaining placeholder items** from `{TARGET}/TODO.md` (the `#001` through `#008` entries that shipped with the template). Replace them entirely with the real tasks derived from the PRD. Do not keep placeholder entries.
 
 #### 3.4 — Mark #000 as the foundation
 
@@ -213,13 +216,13 @@ After completing all documentation and the initial backlog, present a structured
 [Name] — [one-sentence description]
 
 ### Documentation filled in
-- Kalman/CLAUDE.md — stack, conventions, commands
-- Kalman/README.md — overview, getting started, env vars
-- Kalman/PRD.md — [X] functional requirements across [Y] feature areas, [Z] personas
-- Kalman/docs/technical/ARCHITECTURE.md — tech stack and infrastructure
-- Kalman/docs/technical/DESIGN_SYSTEM.md — design/UX templates in place (refined by @ui-ux-designer as UI ships)
-- Kalman/docs/technical/DECISIONS.md — ADR-001: [tech stack decision title]
-- Kalman/docs/content/CONTENT_STRATEGY.md — [brand voice / keyword targets filled in | marked N/A for internal tool]
+- {TARGET}/CLAUDE.md — stack, conventions, commands
+- {TARGET}/README.md — overview, getting started, env vars
+- {TARGET}/PRD.md — [X] functional requirements across [Y] feature areas, [Z] personas
+- {TARGET}/docs/technical/ARCHITECTURE.md — tech stack and infrastructure
+- {TARGET}/docs/technical/DESIGN_SYSTEM.md — design/UX templates in place when relevant
+- {TARGET}/docs/technical/DECISIONS.md — ADR-001: [tech stack decision title]
+- {TARGET}/docs/content/CONTENT_STRATEGY.md — [brand voice / keyword targets filled in | marked N/A for internal tool]
 
 ### Initial Backlog
 Up Next ([N] tasks):
@@ -257,19 +260,19 @@ Do not delete this file before the user says they're happy. "Looks good" or "yes
 Use this to verify everything is done before asking for confirmation in Phase 4.
 
 **Documentation**
-- [ ] Templates copied from `.claude/.claude/templates/` to `Kalman/docs/` and `Kalman/README.md` (step 2.0)
-- [ ] `Kalman/CLAUDE.md` — all placeholders replaced, no `[square brackets]` remaining (or explicitly marked `[TBD]`)
-- [ ] `Kalman/README.md` — all placeholders replaced (copied from `.claude/.claude/templates/README.md`)
-- [ ] `Kalman/PRD.md` — executive summary, personas, numbered FR-XXX requirements, NFRs, out of scope, open questions
-- [ ] `Kalman/docs/technical/ARCHITECTURE.md` — tech stack table and infrastructure environments filled in
-- [ ] `Kalman/docs/technical/DESIGN_SYSTEM.md` — copied from template (placeholder tables OK until design work begins)
-- [ ] `Kalman/docs/technical/DECISIONS.md` — ADR-001 filled in with real tech stack rationale
-- [ ] `Kalman/docs/content/CONTENT_STRATEGY.md` — brand voice and personas filled in (or marked `[N/A]` if internal tool with no public-facing pages)
+- [ ] Templates copied from `.claude/.claude/templates/` to `{TARGET}/docs/` and `{TARGET}/README.md` when files are missing (step 2.0)
+- [ ] `{TARGET}/CLAUDE.md` — all placeholders replaced, no `[square brackets]` remaining (or explicitly marked `[TBD]`)
+- [ ] `{TARGET}/README.md` — all placeholders replaced
+- [ ] `{TARGET}/PRD.md` — executive summary, personas, numbered FR-XXX requirements, NFRs, out of scope, open questions
+- [ ] `{TARGET}/docs/technical/ARCHITECTURE.md` — tech stack table and infrastructure environments filled in
+- [ ] `{TARGET}/docs/technical/DESIGN_SYSTEM.md` — copied or marked N/A when no UI is in scope
+- [ ] `{TARGET}/docs/technical/DECISIONS.md` — ADR-001 filled in with real tech stack rationale
+- [ ] `{TARGET}/docs/content/CONTENT_STRATEGY.md` — brand voice and personas filled in (or marked `[N/A]` if internal tool with no public-facing pages)
 
 **Backlog**
-- [ ] `Kalman/TODO.md` contains only real tasks — no placeholder `#001`–`#008` entries remain
-- [ ] Every TODO item has a corresponding `Kalman/.tasks/NNN-*.md` file
-- [ ] Every `Kalman/.tasks/NNN-*.md` file has: description, acceptance criteria, `prd_refs`, `agent`, `created_at`
+- [ ] `{TARGET}/TODO.md` contains only real tasks — no placeholder `#001`–`#008` entries remain
+- [ ] Every TODO item has a corresponding `{TARGET}/.tasks/NNN-*.md` file
+- [ ] Every `{TARGET}/.tasks/NNN-*.md` file has: description, acceptance criteria, `prd_refs`, `agent`, `required_skills`, `created_at`
 - [ ] `blocks` / `blocked_by` dependencies are set correctly where tasks depend on each other
 - [ ] "Up Next" contains the first tasks that are ready to start, ordered by dependency
 - [ ] Task #000 remains in Completed

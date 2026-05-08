@@ -1,7 +1,7 @@
 # Adaptive Kalman + AMPC - Claude Instructions
 
 > Stack: Vite + Python/Django + MySQL from XAMPP + Django ORM + AWS target
-> Last updated: 2026-04-14
+> Last updated: 2026-04-15
 
 ## Project Context
 
@@ -25,6 +25,9 @@ The current repository includes `../ARX/greenhouse_data.csv` and existing ARX co
 6. Update relevant docs after significant implementation changes.
 7. Run the relevant checks before marking an implementation task complete.
 8. Báo cáo, tóm tắt, cập nhật tiến độ và câu trả lời cho người dùng mặc định dùng tiếng Việt có dấu.
+9. Khi làm việc, có thể kết hợp skill trong `Kalman/.claude/`, `C:\Users\ADMIN\.codex\skills`, và `C:\Users\ADMIN\.agents\skills` để đạt chất lượng tốt hơn. Nếu nhiều skill đều phù hợp và bổ trợ nhau thì kết hợp chúng; nếu có chồng lấn thì ưu tiên skill trong `.claude/` trước, rồi mới mượn skill ngoài khi cần. Với các tác vụ cần hiểu code, tracing luồng xử lý, hoặc phân tích kiến trúc trước khi sửa, có thể dùng thêm `C:\Users\ADMIN\.agents\skills\understand` và `C:\Users\ADMIN\.agents\skills\understand-explain`.
+10. Trước khi bắt đầu một việc mới, phải đọc lại `CLAUDE.md`, các rule trong `.claude/.claude/rules/`, `REVIEW.md`, và `docs/technical/CODEBASE_ONBOARDING.md` để nắm rõ yêu cầu, lịch sử gần đây, kiến trúc hiện tại, và file/function/module liên quan.
+11. Sau khi hoàn thành code, không tự động cập nhật `docs/technical/CODEBASE_ONBOARDING.md` ngay. Chỉ cập nhật file này sau khi người dùng đã review thay đổi và xác nhận OK, để bổ sung các luồng, hàm, module, hoặc thay đổi kiến trúc vừa được chấp nhận.
 
 ---
 
@@ -90,8 +93,11 @@ TODO.md
 - `docs/technical/DESIGN_SYSTEM.md`
 - `docs/technical/DECISIONS.md`
 - `docs/technical/ONBOARDING_ANSWERS.md`
+- `docs/technical/CODEBASE_ONBOARDING.md`
 - `docs/technical/ADAPTIVE_KALMAN_AMPC_NOTES.md`
 - `docs/technical/API.md`
 - `docs/technical/DATABASE.md`
+- `docs/technical/METHODOLOGY_V1.md`
+- `docs/technical/AMPC_MODELING_HANDOFF.md`
 - `docs/user/USER_GUIDE.md`
 - `docs/content/CONTENT_STRATEGY.md`
