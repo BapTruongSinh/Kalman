@@ -50,23 +50,74 @@ export const updateAutoSettings = (payload: Partial<ControlProfile>) =>
   apiClient.patch<ControlProfile>("/auto-settings/", payload);
 
 export interface EstimationCycle {
-  id: number;
-  sensor_data: number;
+  id?: number;
+  greenhouse_id?: number;
+  sensor_data?: number;
   sample_ts: string;
   cycle_index: number;
+  slice_type?: string;
   validation_status: string;
-  validation_reason: string;
+  validation_reason?: string;
   preprocess_status: string;
   cycle_status: string;
   adaptive_status: string;
   raw_soil_moisture: number | null;
   arx_predicted: number | null;
   kf_x_posterior: number | null;
+  kf_innovation?: number | null;
   kf_R: number | null;
-  kf_K: number | null;
+  kf_K?: number | null;
   latency_ms: number | null;
-  error_message: string;
+  error_message?: string;
 }
+
+export interface RunItem {
+  id: number;
+  name: string;
+  run_type: string;
+  status: string;
+  greenhouse_id: number | null;
+  greenhouse_name: string;
+  created_at: string;
+}
+
+export const getRuns = () => apiClient.get<RunItem[]>("/runs/");
+export const getRunSeries = (runId: number, limit = 500) =>
+  apiClient.get<EstimationCycle[]>(`/runs/${runId}/series/?limit=${limit}`);
+
+export interface KalmanTestSeriesResponse {
+  source_database: string;
+  source_table: string;
+  limit: number;
+  total_selected: number;
+  points: EstimationCycle[];
+}
+
+export const getKalmanTestSeries = (limit = 100000) =>
+  apiClient.get<KalmanTestSeriesResponse>(`/kalman-test/series/?limit=${limit}`);
+
+export interface MPCTestPoint {
+  timestamp: string;
+  actual_soil_moisture: number | null;
+  mpc_soil_moisture: number | null;
+  rule_based_soil_moisture: number | null;
+  mpc_pump_seconds: number | null;
+  rule_based_pump_seconds: number | null;
+  target_low: number;
+  target_high: number;
+  safety_status: string;
+  reason: string;
+}
+
+export interface MPCTestSeriesResponse {
+  greenhouse_id: number;
+  source_table: string;
+  total_selected: number;
+  points: MPCTestPoint[];
+}
+
+export const getMPCTestSeries = () =>
+  apiClient.get<MPCTestSeriesResponse>("/mpc-test/series/");
 
 export interface AMPCRecommendation {
   id: number;
