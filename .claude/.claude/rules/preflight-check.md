@@ -6,7 +6,7 @@ Trước khi bắt đầu một hành động mới, luôn thực hiện preflig
 
 1. Đọc nhanh `.claude/.claude/review/REVIEW.md`.
 2. Đọc các rule trong `.claude/.claude/rules/`.
-3. Đọc `Kalman/docs/technical/CODEBASE_ONBOARDING.md` cho estimator/backend/dashboard, hoặc `MPC/docs/technical/CODEBASE_ONBOARDING.md` cho controller MPC/AMPC, để nắm kiến trúc hiện tại, luồng xử lý, và xác định file/function/module liên quan trước khi phân tích hay sửa code.
+3. Đọc `Server/docs/technical/CODEBASE_ONBOARDING.md` cho estimator/backend/dashboard, hoặc `MPC/docs/technical/CODEBASE_ONBOARDING.md` cho controller MPC/AMPC, để nắm kiến trúc hiện tại, luồng xử lý, và xác định file/function/module liên quan trước khi phân tích hay sửa code.
 4. Nếu công việc liên quan tới task, đọc TODO và `.tasks/` của project tương ứng: `Kalman/TODO.md` + `Kalman/.tasks/`, hoặc `MPC/TODO.md` + `MPC/.tasks/`.
 5. Chọn skill phù hợp trong `.claude/.claude/skills/` hoặc skill hệ thống đã cài.
 6. Có thể chọn một hoặc nhiều skills để kết hợp.

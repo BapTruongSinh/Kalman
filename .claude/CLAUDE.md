@@ -33,14 +33,14 @@ These apply to all agents at all times. No exceptions without explicit human ins
 1. **Project PRDs require explicit human approval to modify.** Do not edit `Kalman/PRD.md` or `MPC/PRD.md` unless the human has clearly instructed you to do so in the current conversation. Read the relevant PRD to understand requirements.
 2. **Project TODO files are living backlogs.** Use `Kalman/TODO.md` for estimator/backend/dashboard work and `MPC/TODO.md` for controller work. Agents may add items, mark items complete, and move items to "Completed". Preserve section order and existing item priority — do not reorder items within a section unless explicitly asked to reprioritize.
 3. **All commits use Conventional Commits format** (see Git Conventions below).
-4. **Update the relevant project docs** after every significant change before marking a task complete: `Kalman/docs/` for estimator work, `MPC/docs/` for controller work.
+4. **Update the relevant project docs** after every significant change before marking a task complete: `Server/docs/` for estimator work, `MPC/docs/` for controller work.
 5. **Run tests before marking any implementation task complete.**
 6. **Never hardcode secrets, credentials, or environment-specific values** in source code.
-7. **Consult the relevant `DECISIONS.md`** before proposing changes that may conflict with prior architectural decisions: `Kalman/docs/technical/DECISIONS.md` or `MPC/docs/technical/DECISIONS.md`.
+7. **Consult the relevant `DECISIONS.md`** before proposing changes that may conflict with prior architectural decisions: `Server/docs/technical/DECISIONS.md` or `MPC/docs/technical/DECISIONS.md`.
 8. **Always delegate to the right specialist.** If a task touches application code (frontend, mobile, backend, or database), design/UX/content, testing/documentation, or infrastructure — invoke the appropriate agent (`builder`, `designer`, `quality`, or `infra`) immediately. Do not implement it yourself. The delegation table above is binding, not advisory.
 9. **Commit your own changes; never push.** After completing your work, create a local commit (Conventional Commits format). Do not `git push`. The orchestrator is responsible for pushing the branch and opening the PR.
 10. **When invoking `builder`, specify the domain in your request** (e.g. "frontend task — add dark mode toggle" or "database task — add index on orders table"). The builder reads the corresponding skill before starting work.
-11. **Read rules, review memory, and codebase onboarding before every new prompt/task.** Before any action or answer, read `.claude/.claude/rules/`, then `.claude/.claude/review/REVIEW.md`, then the relevant onboarding file: `Kalman/docs/technical/CODEBASE_ONBOARDING.md` for estimator/backend/dashboard or `MPC/docs/technical/CODEBASE_ONBOARDING.md` for controller work, then the matching TODO and `.tasks/` files.
+11. **Read rules, review memory, and codebase onboarding before every new prompt/task.** Before any action or answer, read `.claude/.claude/rules/`, then `.claude/.claude/review/REVIEW.md`, then the relevant onboarding file: `Server/docs/technical/CODEBASE_ONBOARDING.md` for estimator/backend/dashboard or `MPC/docs/technical/CODEBASE_ONBOARDING.md` for controller work, then the matching TODO and `.tasks/` files.
 12. **Project TODO files are the task source of truth.** Use `Kalman/TODO.md` + `Kalman/.tasks/NNN-*.md` for Kalman work, and `MPC/TODO.md` + `MPC/.tasks/NNN-*.md` for MPC/AMPC controller work. Do not require a plan/discussion workflow or human plan-approval gate before creating or updating tasks unless the human explicitly asks for that workflow.
 13. **Review memory after every prompt/window/task.** At the end of each prompt, work window, or task, append a concise entry to `.claude/.claude/review/REVIEW.md` with files changed, verification, residual risk, and next step.
 14. **Current project direction is Adaptive Kalman + AMPC.** Do not reduce the project back to baseline Kalman + fixed MPC. Use ARX as the first prediction baseline, keep prediction/estimator modules replaceable, and preserve AMPC state/control/disturbance/cost/safety contracts in docs and task design.
@@ -172,9 +172,9 @@ refactor/<description>
 
 ## Testing Conventions
 
-- **Kalman backend**: `cd Kalman/backend; python -m pytest estimation/tests -q`.
-- **Kalman Django checks**: `python manage.py check`, `python manage.py makemigrations --check --dry-run`, `python manage.py migrate --check`.
-- **Kalman dashboard**: `cd Kalman/dashboard; npm test -- --run; npm run build`.
+- **Kalman package**: `python -m pytest Kalman/tests -q`; `python -m compileall -q Kalman/kalman`.
+- **Server Django checks**: `cd Server/backend; python manage.py check`, `python manage.py makemigrations --check --dry-run`, `python manage.py migrate --check`.
+- **Server dashboard**: `cd Server/dashboard; npm test -- --run; npm run build`.
 - **MPC controller**: `python -m pytest MPC/tests -q` after runtime package exists.
 - **Completion gates**: each task must pass Logic, Nghiệp vụ, Security, and Test chạy thực tế gates before completion.
 
@@ -182,10 +182,10 @@ refactor/<description>
 
 ## Environment & Commands
 
-- **Kalman backend dev**: `cd Kalman/backend; python manage.py runserver`.
-- **Kalman backend tests**: `cd Kalman/backend; python -m pytest estimation/tests -q`.
-- **Kalman dashboard dev**: `cd Kalman/dashboard; npm run dev`.
-- **Kalman dashboard tests/build**: `npm test -- --run`; `npm run build`.
+- **Server backend dev**: `cd Server/backend; python manage.py runserver`.
+- **Server backend tests**: `cd Server/backend; python -m pytest estimation/tests -q`.
+- **Server dashboard dev**: `cd Server/dashboard; npm run dev`.
+- **Server dashboard tests/build**: `npm test -- --run`; `npm run build`.
 - **MPC tests target**: `python -m pytest MPC/tests -q`.
 - **Database**: MySQL/XAMPP for Kalman runtime; no SQLite override.
 
@@ -193,15 +193,15 @@ refactor/<description>
 
 ## Key Documentation
 
-@Kalman/docs/technical/ARCHITECTURE.md
-@Kalman/docs/technical/DESIGN_SYSTEM.md
-@Kalman/docs/technical/DECISIONS.md
-@Kalman/docs/technical/ONBOARDING_ANSWERS.md
-@Kalman/docs/technical/CODEBASE_ONBOARDING.md
-@Kalman/docs/technical/ADAPTIVE_KALMAN_AMPC_NOTES.md
-@Kalman/docs/technical/API.md
-@Kalman/docs/technical/DATABASE.md
-@Kalman/docs/user/USER_GUIDE.md
+@Server/docs/technical/ARCHITECTURE.md
+@Server/docs/technical/DESIGN_SYSTEM.md
+@Server/docs/technical/DECISIONS.md
+@Server/docs/technical/ONBOARDING_ANSWERS.md
+@Server/docs/technical/CODEBASE_ONBOARDING.md
+@Server/docs/technical/ADAPTIVE_KALMAN_AMPC_NOTES.md
+@Server/docs/technical/API.md
+@Server/docs/technical/DATABASE.md
+@Server/docs/user/USER_GUIDE.md
 @MPC/PRD.md
 @MPC/TODO.md
 @MPC/docs/technical/ONBOARDING_ANSWERS.md

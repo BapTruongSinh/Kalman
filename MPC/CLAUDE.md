@@ -13,7 +13,7 @@
 
 ## Critical Rules
 
-1. `MPC/` là project root cho controller. Không viết code MPC vào `Kalman/backend` trừ khi có task integration rõ.
+1. `MPC/` là project root cho controller. Không viết code MPC vào `Server/backend` trừ khi có task integration rõ.
 2. `ARX/` là context/artifact source. Không sửa training/data generator của `ARX/` nếu task chỉ là MPC.
 3. `Kalman/` là upstream estimator/runtime. MPC được đọc output live/Kalman posterior, không phá live-only invariant hiện tại.
 4. `MPC/PRD.md` là source of truth cho controller v2/v3. Chỉ sửa khi user yêu cầu hoặc khi đang chạy onboarding/task planning cho MPC.
@@ -78,5 +78,5 @@ Hiện tại `MPC/` đã có core package Python cho config/state/plant adapter,
 @MPC/docs/technical/VALIDATION.md
 @MPC/docs/technical/CODEBASE_ONBOARDING.md
 @MPC/docs/plan/2026-05-08-mpc-v2-ampc-v3.md
-@Kalman/docs/technical/CODEBASE_ONBOARDING.md
-@Kalman/docs/technical/AMPC_MODELING_HANDOFF.md
+@Server/docs/technical/CODEBASE_ONBOARDING.md
+@Server/docs/technical/AMPC_MODELING_HANDOFF.md

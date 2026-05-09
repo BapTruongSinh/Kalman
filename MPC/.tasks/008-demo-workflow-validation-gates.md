@@ -35,7 +35,7 @@ Cập nhật docs hướng dẫn chạy v2/v3, giải thích metric, safety gate
 
 ## Technical Notes
 
-Không cập nhật `Kalman/docs/technical/CODEBASE_ONBOARDING.md` cho MPC implementation cho tới khi có task integration hoặc yêu cầu rõ.
+Không cập nhật `Server/docs/technical/CODEBASE_ONBOARDING.md` cho MPC implementation cho tới khi có task integration hoặc yêu cầu rõ.
 
 ## History
 

@@ -1,0 +1,54 @@
+{
+  "issues": [],
+  "warnings": [
+    "Node has no graph edges: file:.understand-anything/.understandignore",
+    "Node has no graph edges: file:ARX/_fix_notebook.py",
+    "Node has no graph edges: file:ARX/tools/build_arx_notebook_vi.ps1",
+    "Node has no graph edges: file:ARX/tools/rebuild_arx_notebook_vi_utf8.ps1",
+    "Node has no graph edges: file:Kalman/backend/config/__init__.py",
+    "Node has no graph edges: file:Kalman/backend/config/urls.py",
+    "Node has no graph edges: file:Kalman/backend/conftest.py",
+    "Node has no graph edges: file:Kalman/backend/estimation/__init__.py",
+    "Node has no graph edges: file:Kalman/backend/estimation/control/__init__.py",
+    "Node has no graph edges: file:Kalman/backend/estimation/migrations/__init__.py",
+    "Node has no graph edges: file:Kalman/backend/estimation/pipeline/__init__.py",
+    "Node has no graph edges: file:Kalman/backend/estimation/tests/__init__.py",
+    "Node has no graph edges: file:Kalman/dashboard/eslint.config.js",
+    "Node has no graph edges: file:Kalman/dashboard/index.html",
+    "Node has no graph edges: file:Kalman/dashboard/src/App.css",
+    "Node has no graph edges: file:Kalman/dashboard/vite.config.ts",
+    "Node has no graph edges: file:MPC/mpc/__init__.py",
+    "Node has no graph edges: file:MPC/mpc/__main__.py",
+    "Node has no graph edges: file:MPC/tests/conftest.py"
+  ],
+  "schemaIssues": [],
+  "stats": {
+    "filesAnalyzed": 269,
+    "filesScanned": 269,
+    "skippedBinary": 0,
+    "nodes": 826,
+    "edges": 700,
+    "layers": 18,
+    "tourSteps": 6,
+    "categoryCounts": {
+      "config": 12,
+      "docs": 138,
+      "other": 2,
+      "code": 90,
+      "script": 2,
+      "test": 25
+    },
+    "nodeTypes": {
+      "config": 12,
+      "document": 138,
+      "file": 119,
+      "function": 452,
+      "class": 97,
+      "resource": 8
+    },
+    "edgeTypes": {
+      "contains": 557,
+      "imports": 143
+    }
+  }
+}

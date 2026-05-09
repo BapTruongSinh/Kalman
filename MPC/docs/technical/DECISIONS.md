@@ -27,7 +27,7 @@
 
 ### Options Considered
 
-1. **`Kalman/backend/mpc`**: tích hợp nhanh với backend nhưng coupling cao.
+1. **`Server/backend/mpc`**: tích hợp nhanh với backend nhưng coupling cao.
 2. **`Kalman/MPC`**: vẫn nằm trong target Kalman, nhưng kém rõ khi controller là project riêng.
 3. **Repo-root `MPC/`**: tách sạch controller khỏi estimator, vẫn reuse `ARX/` và `Kalman/` context.
 

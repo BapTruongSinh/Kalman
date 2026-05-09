@@ -14,7 +14,7 @@
 
 ## File bắt buộc cập nhật khi thay đổi contract
 
-- `Kalman/docs/technical/API.md` hoặc file contract mapping tương ứng trong `Kalman/docs/technical/`
+- `Server/docs/technical/API.md` hoặc file contract mapping tương ứng trong `Server/docs/technical/`
 - `FE/src/lib/api.ts`
 - `FE/src/lib/*Api.ts`
 - Các page/component FE bị ảnh hưởng
