@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { Save, Zap } from "lucide-react";
+import { Save } from "lucide-react";
 import {
   ControlProfile,
   getAutoSettings,
-  runAutoRecommendation,
   updateAutoSettings,
 } from "../api/endpoints";
 import { Button } from "./ui/button";
@@ -33,13 +32,12 @@ function toNumber(value: string) {
 export function AutoSettings() {
   const [profile, setProfile] = useState<ControlProfile | null>(null);
   const [saving, setSaving] = useState(false);
-  const [running, setRunning] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
     getAutoSettings()
       .then((response) => setProfile(response.data))
-      .catch(() => setMessage("Khong tai duoc cau hinh AUTO."));
+      .catch(() => setMessage("Không tải được cấu hình AMPC."));
   }, []);
 
   const updateNumber = (field: NumericField, value: string) => {
@@ -53,46 +51,33 @@ export function AutoSettings() {
     try {
       const response = await updateAutoSettings(profile);
       setProfile(response.data);
-      setMessage("Da luu cau hinh AUTO.");
+      setMessage("Đã lưu cấu hình AMPC.");
     } catch {
-      setMessage("Luu cau hinh that bai.");
+      setMessage("Lưu cấu hình thất bại.");
     } finally {
       setSaving(false);
-    }
-  };
-
-  const run = async () => {
-    setRunning(true);
-    setMessage("");
-    try {
-      const response = await runAutoRecommendation();
-      setMessage(`AMPC: ${response.data.safety_status} - bom ${response.data.pump_seconds}s`);
-    } catch {
-      setMessage("Chay AMPC that bai.");
-    } finally {
-      setRunning(false);
     }
   };
 
   if (!profile) {
     return (
       <div className="elevated-card rounded-3xl p-5">
-        <p className="text-slate-500" style={{ fontSize: "13px" }}>Dang tai cau hinh AUTO...</p>
+        <p className="text-slate-500" style={{ fontSize: "13px" }}>Đang tải cấu hình AMPC...</p>
       </div>
     );
   }
 
   const fields: Array<[NumericField, string, string]> = [
-    ["target_low", "Nguong am thap", "%"],
-    ["target_high", "Nguong am cao", "%"],
-    ["pump_max_seconds", "Bom toi da moi buoc", "giay"],
-    ["soft_daily_pump_cap_seconds", "Gioi han bom/ngay", "giay"],
-    ["weight_band", "w_band", ""],
-    ["weight_water", "w_water", ""],
-    ["weight_switch", "w_switch", ""],
-    ["weight_daily", "w_daily", ""],
-    ["weight_terminal", "w_terminal", ""],
-    ["crop_kc", "He so cay trong Kc", ""],
+    ["target_low", "Ngưỡng ẩm thấp", "%"],
+    ["target_high", "Ngưỡng ẩm cao", "%"],
+    ["pump_max_seconds", "Bơm tối đa mỗi bước", "giây"],
+    ["soft_daily_pump_cap_seconds", "Giới hạn bơm/ngày", "giây"],
+    ["weight_band", "Trọng số lệch vùng ẩm", ""],
+    ["weight_water", "Trọng số tiết kiệm nước", ""],
+    ["weight_switch", "Trọng số đổi lệnh", ""],
+    ["weight_daily", "Trọng số giới hạn ngày", ""],
+    ["weight_terminal", "Trọng số cuối chu kỳ", ""],
+    ["crop_kc", "Hệ số cây trồng Kc", ""],
   ];
 
   return (
@@ -100,20 +85,16 @@ export function AutoSettings() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
           <p className="text-slate-800" style={{ fontSize: "15px", fontWeight: 800 }}>
-            Cau hinh AMPC
+            Cấu hình AMPC
           </p>
           <p className="text-slate-500" style={{ fontSize: "12px" }}>
-            Cac tham so cay trong va trong so dieu khien dang luu tren backend.
+            Các tham số cây trồng và trọng số điều khiển đang lưu trên backend.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={run} disabled={running} variant="outline" size="sm">
-            <Zap className="w-4 h-4 mr-2" />
-            Chay AMPC
-          </Button>
           <Button onClick={save} disabled={saving} size="sm">
             <Save className="w-4 h-4 mr-2" />
-            Luu
+            Lưu
           </Button>
         </div>
       </div>
@@ -140,14 +121,14 @@ export function AutoSettings() {
             checked={profile.adaptive_enabled}
             onCheckedChange={(checked) => setProfile({ ...profile, adaptive_enabled: checked })}
           />
-          Bias correction
+          Bù sai số thích nghi
         </label>
         <label className="flex items-center gap-2 text-slate-700" style={{ fontSize: "13px", fontWeight: 700 }}>
           <Switch
             checked={profile.actuator_enabled}
             onCheckedChange={(checked) => setProfile({ ...profile, actuator_enabled: checked })}
           />
-          Tu dong gui lenh bom
+          Tự động gửi lệnh bơm
         </label>
         {message && <span className="text-slate-500" style={{ fontSize: "12px" }}>{message}</span>}
       </div>

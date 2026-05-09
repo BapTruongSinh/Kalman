@@ -25,8 +25,8 @@ from .models import (
 )
 from .serializers import (
     AMPCRecommendationSerializer,
+    AMPCSchedulerStateSerializer,
     AlertSerializer,
-    ControlProfileSerializer,
     ControlStateSerializer,
     DeviceCommandSerializer,
     DeviceSerializer,
@@ -44,10 +44,14 @@ from .ampc import (
     default_greenhouse,
     get_greenhouse_control_profile,
     get_greenhouse_for_user,
-    get_control_profile,
-    latest_recommendation,
     latest_recommendation_for_greenhouse,
     run_auto_recommendation,
+)
+from .ampc_scheduler import (
+    get_scheduler_state,
+    run_due_once,
+    start_scheduler,
+    stop_scheduler,
 )
 from .estimation import ensure_estimation_for_reading, latest_estimation
 from .services import (
@@ -78,6 +82,66 @@ def _to_bool(value):
     if isinstance(value, (int, float)):
         return value != 0
     return str(value).strip().lower() in {'1', 'true', 'on', 'yes'}
+
+
+def _legacy_auto_settings_payload(profile):
+    return {
+        'crop_name': profile.crop_name,
+        'crop_kc': profile.crop_kc,
+        'target_low': profile.target_low,
+        'target_high': profile.target_high,
+        'step_seconds': profile.step_seconds,
+        'horizon_steps': profile.horizon_steps,
+        'pump_min_seconds': profile.pump_min_seconds,
+        'pump_max_seconds': profile.pump_max_seconds,
+        'pump_grid_seconds': profile.pump_grid_seconds,
+        'soft_daily_pump_cap_seconds': profile.soft_daily_pump_cap_seconds,
+        'weight_band': profile.cost_band_violation,
+        'weight_water': profile.cost_water_use,
+        'weight_switch': profile.cost_switching,
+        'weight_daily': profile.cost_daily_cap_excess,
+        'weight_terminal': profile.cost_terminal_band_violation,
+        'adaptive_enabled': profile.adaptive_enabled,
+        'adaptive_bias_window': profile.adaptive_bias_window,
+        'adaptive_max_abs_bias': profile.adaptive_max_abs_bias,
+        'stale_after_seconds': profile.safety_stale_after_seconds,
+        'actuator_enabled': profile.actuator_enabled,
+        'updated_at': profile.updated_at,
+    }
+
+
+def _legacy_auto_settings_patch(data) -> dict:
+    mapping = {
+        'weight_band': 'cost_band_violation',
+        'weight_water': 'cost_water_use',
+        'weight_switch': 'cost_switching',
+        'weight_daily': 'cost_daily_cap_excess',
+        'weight_terminal': 'cost_terminal_band_violation',
+        'stale_after_seconds': 'safety_stale_after_seconds',
+    }
+    allowed = {
+        'crop_name',
+        'crop_kc',
+        'target_low',
+        'target_high',
+        'step_seconds',
+        'horizon_steps',
+        'pump_min_seconds',
+        'pump_max_seconds',
+        'pump_grid_seconds',
+        'soft_daily_pump_cap_seconds',
+        'adaptive_enabled',
+        'adaptive_bias_window',
+        'adaptive_max_abs_bias',
+        'actuator_enabled',
+    }
+    patch = {}
+    for key, value in data.items():
+        if key in mapping:
+            patch[mapping[key]] = value
+        elif key in allowed:
+            patch[key] = value
+    return patch
 
 
 def _get_control_state():
@@ -262,7 +326,8 @@ class ForecastView(APIView):
         greenhouse = default_greenhouse(request.user)
         latest = SensorData.objects.filter(greenhouse=greenhouse).order_by('-recorded_at', '-id').first()
         estimation = latest_estimation(greenhouse=greenhouse)
-        recommendation = latest_recommendation_for_greenhouse(greenhouse) or latest_recommendation()
+        recommendation = latest_recommendation_for_greenhouse(greenhouse)
+        scheduler_state = get_scheduler_state(greenhouse=greenhouse)
 
         history_rows = SensorData.objects.filter(greenhouse=greenhouse).order_by('-recorded_at', '-id')[:6]
         history = [
@@ -274,20 +339,28 @@ class ForecastView(APIView):
             'latest': SensorDataSerializer(latest).data if latest else None,
             'estimation': EstimationCycleSerializer(estimation).data if estimation else None,
             'recommendation': AMPCRecommendationSerializer(recommendation).data if recommendation else None,
+            'scheduler': AMPCSchedulerStateSerializer(scheduler_state).data,
             'history': history,
         })
 
 
 class AutoSettingsView(APIView):
     def get(self, request):
-        return Response(ControlProfileSerializer(get_control_profile()).data)
+        greenhouse = default_greenhouse(request.user)
+        profile = get_greenhouse_control_profile(greenhouse)
+        return Response(_legacy_auto_settings_payload(profile))
 
     def patch(self, request):
-        profile = get_control_profile()
-        serializer = ControlProfileSerializer(profile, data=request.data, partial=True)
+        greenhouse = default_greenhouse(request.user)
+        profile = get_greenhouse_control_profile(greenhouse)
+        serializer = GreenhouseControlProfileSerializer(
+            profile,
+            data=_legacy_auto_settings_patch(request.data),
+            partial=True,
+        )
         serializer.is_valid(raise_exception=True)
-        serializer.save()
-        return Response(serializer.data)
+        profile = serializer.save()
+        return Response(_legacy_auto_settings_payload(profile))
 
 
 class AutoRecommendationView(APIView):
@@ -295,6 +368,24 @@ class AutoRecommendationView(APIView):
         recommendation = run_auto_recommendation(create_command_if_auto=True, user=request.user)
         status_code = status.HTTP_200_OK if recommendation.safety_status == 'safe' else status.HTTP_202_ACCEPTED
         return Response(AMPCRecommendationSerializer(recommendation).data, status=status_code)
+
+
+class AMPCSchedulerView(APIView):
+    def get(self, request):
+        return Response(AMPCSchedulerStateSerializer(get_scheduler_state(user=request.user)).data)
+
+
+class AMPCSchedulerStartView(APIView):
+    def post(self, request):
+        state = start_scheduler(user=request.user)
+        state = run_due_once(force=True, state_id=state.id) or get_scheduler_state(user=request.user)
+        return Response(AMPCSchedulerStateSerializer(state).data)
+
+
+class AMPCSchedulerStopView(APIView):
+    def post(self, request):
+        state = stop_scheduler(user=request.user)
+        return Response(AMPCSchedulerStateSerializer(state).data)
 
 
 class RunListView(generics.ListAPIView):
@@ -517,18 +608,19 @@ class IngestReadingsView(APIView):
 
     def post(self, request):
         _check_ingest_token(request)
-        greenhouse = default_greenhouse()
+        greenhouse_id = request.data.get('greenhouse_id')
+        greenhouse = (
+            generics.get_object_or_404(Greenhouse, pk=greenhouse_id, is_active=True)
+            if greenhouse_id is not None
+            else default_greenhouse()
+        )
         reading = ingest_sensor_payload(request.data, device_code='esp32-main', greenhouse=greenhouse)
         estimation = ensure_estimation_for_reading(reading, greenhouse=greenhouse)
-
-        recommendation = None
-        if _get_control_state().mode == ControlState.Mode.AUTO:
-            recommendation = run_auto_recommendation(create_command_if_auto=True, greenhouse_id=greenhouse.id)
 
         return Response({
             'id': reading.id,
             'estimation_id': estimation.id,
-            'recommendation_id': recommendation.id if recommendation else None,
+            'recommendation_id': None,
             'message': 'Đã nhận dữ liệu cảm biến',
         })
 

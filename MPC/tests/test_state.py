@@ -11,6 +11,7 @@ def test_controller_state_prefers_kalman_posterior() -> None:
     state = ControllerState(
         timestamp=datetime.now(timezone.utc),
         kf_x_posterior=58.0,
+        kf_R=15.0,
         raw_soil_moisture=41.0,
         temperature=27.0,
         humidity=72.0,
@@ -18,6 +19,34 @@ def test_controller_state_prefers_kalman_posterior() -> None:
     )
 
     assert state.soil_moisture == 58.0
+
+
+def test_controller_state_falls_back_to_raw_when_kalman_r_is_too_high() -> None:
+    state = ControllerState(
+        timestamp=datetime.now(timezone.utc),
+        kf_x_posterior=40.0,
+        kf_R=15.1,
+        raw_soil_moisture=60.0,
+        temperature=27.0,
+        humidity=72.0,
+        light=300.0,
+    )
+
+    assert state.soil_moisture == 60.0
+
+
+def test_controller_state_requires_raw_when_kalman_r_is_too_high() -> None:
+    state = ControllerState(
+        timestamp=datetime.now(timezone.utc),
+        kf_x_posterior=40.0,
+        kf_R=15.1,
+        temperature=27.0,
+        humidity=72.0,
+        light=300.0,
+    )
+
+    with pytest.raises(ValueError, match="raw_soil_moisture"):
+        _ = state.soil_moisture
 
 
 def test_controller_state_falls_back_to_raw_soil_moisture() -> None:

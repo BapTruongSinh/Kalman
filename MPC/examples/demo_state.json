@@ -2,6 +2,7 @@
   "run_id": 1,
   "timestamp": "2026-05-09T10:00:00+00:00",
   "kf_x_posterior": 54.0,
+  "kf_R": 1.0,
   "raw_soil_moisture": 54.2,
   "temperature": 27.0,
   "humidity": 72.0,

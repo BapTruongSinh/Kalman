@@ -9,6 +9,7 @@
   "run_id": 1,
   "timestamp": "2026-05-08T10:00:00Z",
   "kf_x_posterior": 58.2,
+  "kf_R": 1.4,
   "raw_soil_moisture": 58.5,
   "temperature": 27.0,
   "humidity": 74.0,
@@ -19,7 +20,8 @@
 
 Rules:
 
-- Ưu tiên `kf_x_posterior`.
+- Ưu tiên `kf_x_posterior` khi Kalman confidence còn tin được (`kf_R <= 15` hoặc không có `kf_R` trong payload cũ).
+- Nếu `kf_R > 15` và có `raw_soil_moisture`, controller dùng raw sensor thay posterior.
 - Nếu thiếu `kf_x_posterior`, dùng `raw_soil_moisture`.
 - Nếu cả hai thiếu, sample stale, hoặc timestamp ở tương lai quá clock skew nhỏ, recommendation phải fail closed.
 - Khi forecast, state mới nhất là source of truth; solver thay latest history record bằng `state.to_plant_record()`.

@@ -20,7 +20,7 @@ from mpc.config import (
 )
 from mpc.plant import ARXPlantModel
 from mpc.solver import GridShootingSolver
-from mpc.state import ControllerState, PlantRecord
+from mpc.state import MAX_TRUSTED_KALMAN_R, ControllerState, PlantRecord
 from mpc.types import Recommendation
 
 from .estimation import ensure_estimation_for_reading, latest_estimation
@@ -193,9 +193,44 @@ def _used_today_pump_seconds(now: datetime, greenhouse: Greenhouse | None = None
     return float(total or 0.0)
 
 
+def _raw_fallback_delta() -> float:
+    return float(getattr(settings, 'AMPC_RAW_FALLBACK_DELTA', 8.0))
+
+
+def _control_soil_moisture(cycle: EstimationCycle) -> float:
+    raw = cycle.raw_soil_moisture
+    posterior = cycle.kf_x_posterior
+    kalman_r = cycle.kf_R
+    if raw is not None and kalman_r is not None and float(kalman_r) > MAX_TRUSTED_KALMAN_R:
+        return float(raw)
+    if raw is not None and posterior is not None and abs(float(posterior) - float(raw)) > _raw_fallback_delta():
+        return float(raw)
+    if posterior is not None:
+        return float(posterior)
+    if raw is not None:
+        return float(raw)
+    raise ValueError('missing_soil_moisture')
+
+
+def _uses_raw_fallback(cycle: EstimationCycle) -> bool:
+    return (
+        cycle.raw_soil_moisture is not None
+        and (
+            (
+                cycle.kf_x_posterior is not None
+                and abs(float(cycle.kf_x_posterior) - float(cycle.raw_soil_moisture)) > _raw_fallback_delta()
+            )
+            or (
+                cycle.kf_R is not None
+                and float(cycle.kf_R) > MAX_TRUSTED_KALMAN_R
+            )
+        )
+    )
+
+
 def _plant_record_from_cycle(cycle: EstimationCycle) -> PlantRecord:
     return PlantRecord(
-        soil_moisture=float(cycle.kf_x_posterior if cycle.kf_x_posterior is not None else cycle.raw_soil_moisture),
+        soil_moisture=_control_soil_moisture(cycle),
         temperature=float(cycle.raw_temperature),
         humidity=float(cycle.raw_humidity),
         light=float(cycle.raw_light),
@@ -234,7 +269,7 @@ def _bias_state(profile: ControlProfile | GreenhouseControlProfile, now: datetim
     )
     residuals = []
     for cycle in reversed(list(cycles)):
-        residual = float(cycle.kf_x_posterior) - float(cycle.arx_predicted)
+        residual = _control_soil_moisture(cycle) - float(cycle.arx_predicted)
         if abs(residual) <= profile.adaptive_max_abs_bias * 2.0:
             residuals.append(residual)
     residuals = residuals[-profile.adaptive_bias_window:]
@@ -251,8 +286,11 @@ def _state_snapshot(estimation: EstimationCycle, state: ControllerState) -> dict
         'run_id': estimation.run_id,
         'greenhouse_id': estimation.greenhouse_id,
         'timestamp': state.timestamp.isoformat(),
-        'kf_x_posterior': state.kf_x_posterior,
+        'kf_x_posterior': estimation.kf_x_posterior,
+        'kf_R': estimation.kf_R,
         'raw_soil_moisture': state.raw_soil_moisture,
+        'control_soil_moisture': state.soil_moisture,
+        'used_raw_fallback': _uses_raw_fallback(estimation),
         'temperature': state.temperature,
         'humidity': state.humidity,
         'light': state.light,
@@ -374,12 +412,19 @@ def run_auto_recommendation(
             used_today=used_today,
             greenhouse=greenhouse,
             sensor_data=None,
+            actuator_status=(
+                AMPCRecommendation.ActuatorStatus.UNSAFE_SKIPPED
+                if profile.actuator_enabled
+                else AMPCRecommendation.ActuatorStatus.DISABLED
+            ),
         )
 
     sensor_data = SensorData.objects.filter(greenhouse=greenhouse, recorded_at=latest.sample_ts).order_by('-id').first()
+    use_raw_fallback = _uses_raw_fallback(latest)
     state = ControllerState(
         timestamp=latest.sample_ts,
-        kf_x_posterior=latest.kf_x_posterior,
+        kf_x_posterior=None if use_raw_fallback else latest.kf_x_posterior,
+        kf_R=latest.kf_R,
         raw_soil_moisture=latest.raw_soil_moisture,
         temperature=latest.raw_temperature,
         humidity=latest.raw_humidity,

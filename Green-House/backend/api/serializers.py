@@ -6,6 +6,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from .models import (
     AMPCRecommendation,
+    AMPCSchedulerState,
     Alert,
     ControlProfile,
     ControlState,
@@ -155,6 +156,26 @@ class ControlStateSerializer(serializers.ModelSerializer):
     class Meta:
         model = ControlState
         fields = ["mode", "manual_reason", "manual_changed_at", "updated_at"]
+
+
+class AMPCSchedulerStateSerializer(serializers.ModelSerializer):
+    greenhouse_id = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = AMPCSchedulerState
+        fields = [
+            "greenhouse_id",
+            "is_enabled",
+            "interval_seconds",
+            "is_executing",
+            "last_started_at",
+            "last_stopped_at",
+            "last_run_at",
+            "next_run_at",
+            "last_status",
+            "last_error",
+            "updated_at",
+        ]
 
 
 class EstimationCycleSerializer(serializers.ModelSerializer):

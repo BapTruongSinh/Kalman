@@ -96,7 +96,7 @@ Boundary rules:
 Implementation ban đầu nên expose frozen dataclasses từ `mpc.config`, `mpc.state`, và `mpc.types`:
 
 - `ControllerConfig`, `TargetBand`, `PumpLimits`, `CostWeights`, `SafetyConfig`.
-- `ControllerState` ưu tiên `kf_x_posterior` trước `raw_soil_moisture`.
+- `ControllerState` ưu tiên `kf_x_posterior` trước `raw_soil_moisture`, nhưng nếu payload có `kf_R > 15` thì posterior bị xem là không đủ tin cậy và fallback sang raw.
 - `DisturbanceForecast` dùng measured-hold `Temperature`, `Humidity`, `Light`.
 - `Recommendation` gồm `pump_seconds`, `step_seconds`, `predicted_soil_moisture`, `target_band`, `cost`, `safety_status`, và `reason`.
 

@@ -66,6 +66,17 @@ def _prediction_adapter() -> ARXPredictionAdapter | None:
         return None
 
 
+def _live_kalman_config(reading: SensorData) -> KalmanConfig:
+    return KalmanConfig(
+        x0=_float_or_none(reading.soil_moisture) or 0.0,
+        Q=float(getattr(settings, 'KALMAN_LIVE_Q', 12.0)),
+        R0=float(getattr(settings, 'KALMAN_LIVE_R0', 1.0)),
+        R_min=float(getattr(settings, 'KALMAN_LIVE_R_MIN', 0.25)),
+        R_max=float(getattr(settings, 'KALMAN_LIVE_R_MAX', 4.0)),
+        alpha=float(getattr(settings, 'KALMAN_LIVE_ALPHA', 0.5)),
+    )
+
+
 def _processed_from_cycle(cycle: EstimationCycle) -> ProcessedRecord:
     raw = RawRecord(
         timestamp=cycle.sample_ts,
@@ -124,10 +135,11 @@ def _restore_estimator_state(
         and latest.kf_P_posterior is not None
         and latest.kf_R is not None
     ):
+        config = estimator.config
         estimator._state = KalmanState(  # noqa: SLF001
             x_post=float(latest.kf_x_posterior),
             P_post=float(latest.kf_P_posterior),
-            R=float(latest.kf_R),
+            R=max(config.R_min, min(config.R_max, float(latest.kf_R))),
             step=latest.cycle_index + 1,
         )
     return latest.cycle_index + 1
@@ -150,7 +162,7 @@ def ensure_estimation_for_reading(
         return existing
 
     adapter = _prediction_adapter()
-    estimator = AdaptiveKalmanCycle(KalmanConfig(x0=_float_or_none(reading.soil_moisture) or 0.0), adapter=adapter)
+    estimator = AdaptiveKalmanCycle(_live_kalman_config(reading), adapter=adapter)
     cycle_index = _restore_estimator_state(estimator, greenhouse=greenhouse, run=run)
     min_history = getattr(adapter, 'min_history_len', 0) if adapter is not None else 0
     estimator._history = _recent_processed_history(max(min_history, 12), greenhouse=greenhouse, run=run)  # noqa: SLF001

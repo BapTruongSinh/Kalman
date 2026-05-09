@@ -115,7 +115,7 @@ class KalmanConfig:
     Q: float = 0.05
     R0: float = 1.0
     R_min: float = 0.05
-    R_max: float = 25.0
+    R_max: float = 15.0
     alpha: float = 0.95
 
     def __post_init__(self) -> None:

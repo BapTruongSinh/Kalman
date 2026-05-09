@@ -59,6 +59,17 @@ def test_step_updates_state_with_measurement() -> None:
     assert est.state.step == 1
 
 
+def test_default_adaptive_r_cap_is_15() -> None:
+    assert KalmanConfig().R_max == 15.0
+
+
+def test_large_innovation_clips_r_at_15_by_default() -> None:
+    est = AdaptiveKalmanCycle(KalmanConfig(x0=50.0), adapter=FakeAdapter())
+    result = est.step(_record(80.0), cycle_index=0)
+
+    assert result.R == 15.0
+
+
 def test_step_skips_missing_measurement() -> None:
     est = AdaptiveKalmanCycle(KalmanConfig(x0=50.0))
     result = est.step(_record(None, status="skipped"), cycle_index=0)

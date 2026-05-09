@@ -335,6 +335,35 @@ class ControlState(TimeStampedModel):
         return f'Control<{self.mode}>'
 
 
+class AMPCSchedulerState(TimeStampedModel):
+    singleton_key = models.CharField(max_length=20, unique=True, default='main')
+    greenhouse = models.ForeignKey(
+        Greenhouse,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name='ampc_scheduler_states',
+        db_constraint=False,
+    )
+    is_enabled = models.BooleanField(default=False)
+    interval_seconds = models.PositiveIntegerField(default=300)
+    is_executing = models.BooleanField(default=False)
+    last_started_at = models.DateTimeField(null=True, blank=True)
+    last_stopped_at = models.DateTimeField(null=True, blank=True)
+    last_run_at = models.DateTimeField(null=True, blank=True)
+    next_run_at = models.DateTimeField(null=True, blank=True)
+    last_status = models.CharField(max_length=40, blank=True)
+    last_error = models.TextField(blank=True)
+
+    class Meta:
+        verbose_name = 'AMPC scheduler state'
+        verbose_name_plural = 'AMPC scheduler state'
+
+    def __str__(self):
+        status = 'enabled' if self.is_enabled else 'disabled'
+        return f'AMPCScheduler<{status}>'
+
+
 class ControlProfile(TimeStampedModel):
     singleton_key = models.CharField(max_length=20, unique=True, default='main')
     crop_name = models.CharField(max_length=100, default='Default crop')

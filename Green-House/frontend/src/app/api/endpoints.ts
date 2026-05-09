@@ -89,16 +89,37 @@ export interface AMPCRecommendation {
   created_at: string;
 }
 
+export interface AMPCSchedulerState {
+  greenhouse_id: number | null;
+  is_enabled: boolean;
+  interval_seconds: number;
+  is_executing: boolean;
+  last_started_at: string | null;
+  last_stopped_at: string | null;
+  last_run_at: string | null;
+  next_run_at: string | null;
+  last_status: string;
+  last_error: string;
+  updated_at: string;
+}
+
 export interface ForecastResponse {
   latest: SensorReading | null;
   estimation: EstimationCycle | null;
   recommendation: AMPCRecommendation | null;
+  scheduler: AMPCSchedulerState;
   history: SensorReading[];
 }
 
 export const getForecast = () => apiClient.get<ForecastResponse>("/forecast/");
 export const runAutoRecommendation = () =>
   apiClient.post<AMPCRecommendation>("/control/auto-recommendation/");
+export const getAmpcScheduler = () =>
+  apiClient.get<AMPCSchedulerState>("/control/ampc-scheduler/");
+export const startAmpcScheduler = () =>
+  apiClient.post<AMPCSchedulerState>("/control/ampc-scheduler/start/");
+export const stopAmpcScheduler = () =>
+  apiClient.post<AMPCSchedulerState>("/control/ampc-scheduler/stop/");
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 export interface DashboardOverview {

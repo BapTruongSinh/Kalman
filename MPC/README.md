@@ -18,7 +18,7 @@ V3 mở rộng thành Adaptive MPC bằng cách bù bias dự báo từ sai số
 |-------|------------|-------|
 | Controller core | Python | Package import được và CLI |
 | Model source | `../ARX/arx_model.json` | Reuse ARX artifact, không train trong MPC |
-| State source | Kalman posterior / raw sensor fallback | Standalone CLI reads file/state payload; production DB/API integration is implemented in `Green-House/` |
+| State source | Kalman posterior / raw sensor fallback | If payload includes `kf_R > 15`, MPC treats posterior as untrusted and falls back to raw sensor |
 | Solver | Beam-grid shooting | Không thêm SciPy/CVXPY ở v2 |
 | Simulation | CSV + JSON report | So sánh MPC với threshold baseline |
 | Actuator pilot | HTTP POST + Bearer token | Chỉ ở v3, config/env driven |

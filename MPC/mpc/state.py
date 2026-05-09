@@ -8,6 +8,9 @@ from math import isfinite
 from typing import Any, Mapping
 
 
+MAX_TRUSTED_KALMAN_R = 15.0
+
+
 def _finite_or_none(value: float | int | None, field_name: str) -> float | None:
     if value is None:
         return None
@@ -63,6 +66,7 @@ class ControllerState:
 
     timestamp: datetime
     kf_x_posterior: float | None = None
+    kf_R: float | None = None
     raw_soil_moisture: float | None = None
     temperature: float | None = None
     humidity: float | None = None
@@ -74,6 +78,7 @@ class ControllerState:
         if not isinstance(self.timestamp, datetime):
             raise TypeError("timestamp must be a datetime")
         _finite_or_none(self.kf_x_posterior, "kf_x_posterior")
+        _finite_or_none(self.kf_R, "kf_R")
         _finite_or_none(self.raw_soil_moisture, "raw_soil_moisture")
         _finite_or_none(self.temperature, "temperature")
         _finite_or_none(self.humidity, "humidity")
@@ -83,11 +88,16 @@ class ControllerState:
 
     @property
     def soil_moisture(self) -> float:
-        """Prefer Kalman posterior, then fallback to raw soil moisture."""
+        """Prefer trusted Kalman posterior, then fallback to raw soil moisture."""
         posterior = _finite_or_none(self.kf_x_posterior, "kf_x_posterior")
+        kalman_r = _finite_or_none(self.kf_R, "kf_R")
+        raw = _finite_or_none(self.raw_soil_moisture, "raw_soil_moisture")
+        if kalman_r is not None and kalman_r > MAX_TRUSTED_KALMAN_R:
+            if raw is not None:
+                return raw
+            raise ValueError("state requires raw_soil_moisture when kf_R is above 15")
         if posterior is not None:
             return posterior
-        raw = _finite_or_none(self.raw_soil_moisture, "raw_soil_moisture")
         if raw is not None:
             return raw
         raise ValueError("state requires kf_x_posterior or raw_soil_moisture")
@@ -108,6 +118,7 @@ class ControllerState:
                 payload.get("kf_x_posterior"),
                 "kf_x_posterior",
             ),
+            kf_R=_finite_or_none(payload.get("kf_R"), "kf_R"),
             raw_soil_moisture=_finite_or_none(
                 payload.get("raw_soil_moisture"),
                 "raw_soil_moisture",
