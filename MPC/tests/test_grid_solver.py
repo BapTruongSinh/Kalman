@@ -6,7 +6,7 @@ from typing import Sequence
 
 import pytest
 
-from mpc.config import ControllerConfig, CostWeights, PumpLimits
+from mpc.config import ControllerConfig, CostWeights, PumpLimits, SafetyConfig
 from mpc.solver import GridShootingSolver, score_trajectory
 from mpc.state import ControllerState, DisturbanceForecast, PlantRecord
 
@@ -212,6 +212,77 @@ def test_score_trajectory_penalizes_soft_daily_cap_excess() -> None:
 
     assert cost.daily_cap > 0.0
     assert cost.total >= cost.daily_cap
+
+
+def test_score_trajectory_normalizes_water_and_switching_by_pump_max() -> None:
+    config = ControllerConfig(
+        pump=PumpLimits(max_seconds=20.0, grid_seconds=10.0),
+        cost=CostWeights(
+            band_violation=0.0,
+            terminal_band_violation=0.0,
+            water_use=2.0,
+            switching=3.0,
+            daily_cap_excess=0.0,
+        ),
+    )
+
+    cost = score_trajectory(
+        predictions=(60.0,),
+        pump_seconds=(10.0,),
+        previous_pump_seconds=0.0,
+        used_today_pump_seconds=0.0,
+        config=config,
+    )
+
+    assert cost.water == pytest.approx(2.0 * (10.0 / 20.0) ** 2)
+    assert cost.switching == pytest.approx(3.0 * (10.0 / 20.0) ** 2)
+
+
+def test_score_trajectory_daily_cap_uses_total_planned_excess_ratio() -> None:
+    config = ControllerConfig(
+        pump=PumpLimits(max_seconds=300.0, grid_seconds=300.0),
+        cost=CostWeights(
+            band_violation=0.0,
+            terminal_band_violation=0.0,
+            water_use=0.0,
+            switching=0.0,
+            daily_cap_excess=4.0,
+        ),
+        safety=SafetyConfig(soft_daily_pump_cap_seconds=100.0),
+    )
+
+    cost = score_trajectory(
+        predictions=(60.0, 60.0),
+        pump_seconds=(80.0, 50.0),
+        previous_pump_seconds=0.0,
+        used_today_pump_seconds=20.0,
+        config=config,
+    )
+
+    expected_ratio = (20.0 + 130.0 - 100.0) / 100.0
+    assert cost.daily_cap == pytest.approx(4.0 * expected_ratio**2)
+
+
+def test_score_trajectory_terminal_cost_uses_final_band_error() -> None:
+    config = ControllerConfig(
+        cost=CostWeights(
+            band_violation=0.0,
+            terminal_band_violation=5.0,
+            water_use=0.0,
+            switching=0.0,
+            daily_cap_excess=0.0,
+        )
+    )
+
+    cost = score_trajectory(
+        predictions=(60.0, 53.0),
+        pump_seconds=(0.0, 0.0),
+        previous_pump_seconds=0.0,
+        used_today_pump_seconds=0.0,
+        config=config,
+    )
+
+    assert cost.terminal == pytest.approx(5.0 * (55.0 - 53.0) ** 2)
 
 
 def test_grid_solver_rejects_negative_used_today_fails_closed() -> None:

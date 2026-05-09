@@ -20,6 +20,8 @@ class SimulationMetrics:
     cost_breakdown: dict[str, float]
     final_soil_moisture: float
     safety_counts: dict[str, int]
+    mean_absolute_observation_error: float
+    max_absolute_observation_error: float
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -32,6 +34,10 @@ class SimulationMetrics:
             "cost_breakdown": dict(self.cost_breakdown),
             "final_soil_moisture": self.final_soil_moisture,
             "safety_counts": dict(self.safety_counts),
+            "mean_absolute_observation_error": (
+                self.mean_absolute_observation_error
+            ),
+            "max_absolute_observation_error": self.max_absolute_observation_error,
         }
 
 
@@ -84,5 +90,18 @@ def config_summary(config: ControllerConfig) -> dict[str, object]:
             "min_seconds": config.pump.min_seconds,
             "max_seconds": config.pump.max_seconds,
             "grid_seconds": config.pump.grid_seconds,
+        },
+        "adaptive": {
+            "enabled": config.adaptive.enabled,
+            "bias_window": config.adaptive.bias_window,
+            "max_abs_bias": config.adaptive.max_abs_bias,
+        },
+        "actuator": {
+            "enabled": config.actuator.enabled,
+            "url_configured": config.actuator.url is not None,
+            "bearer_token_env_configured": (
+                config.actuator.bearer_token_env is not None
+            ),
+            "timeout_seconds": config.actuator.timeout_seconds,
         },
     }

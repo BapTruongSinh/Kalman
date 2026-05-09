@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from math import isfinite
 from pathlib import Path
 from typing import Iterable, Sequence
 
+from mpc.adaptive import BiasCorrectedPlantModel, BiasEstimator, BiasState
 from mpc.config import ControllerConfig
 from mpc.plant import PlantModel
 from mpc.simulation.baseline import baseline_definition, threshold_baseline_pump_seconds
@@ -20,7 +21,7 @@ from mpc.simulation.report import (
 )
 from mpc.solver.cost import TrajectoryCost, band_error
 from mpc.solver.grid import GridShootingSolver
-from mpc.state import ControllerState, DisturbanceForecast, PlantRecord
+from mpc.state import ControllerState, PlantRecord
 
 _REQUIRED_COLUMNS = {
     "Timestamp",
@@ -59,6 +60,7 @@ class _RolloutResult:
     soils: tuple[float, ...]
     pumps: tuple[float, ...]
     dates: tuple[date, ...]
+    observed_soils: tuple[float, ...]
     safety_counts: dict[str, int]
 
 
@@ -131,6 +133,90 @@ def run_simulation(
     )
 
 
+def run_adaptive_simulation(
+    *,
+    csv_path: str | Path,
+    plant_model: PlantModel,
+    config: ControllerConfig,
+    max_steps: int | None = None,
+    beam_width: int = 32,
+) -> SimulationReport:
+    rows = read_simulation_csv(csv_path)
+    warmup_rows = plant_model.min_history_len
+    if len(rows) <= warmup_rows:
+        raise ValueError(
+            "CSV input must contain more rows than plant min_history_len"
+        )
+    if max_steps is not None and max_steps < 1:
+        raise ValueError("max_steps must be >= 1")
+    config = _adaptive_enabled_config(config)
+
+    candidate_rows = rows[warmup_rows:]
+    if max_steps is not None:
+        candidate_rows = candidate_rows[:max_steps]
+    if not candidate_rows:
+        raise ValueError("simulation has no rows after warmup")
+
+    initial_history = [row.to_plant_record() for row in rows[:warmup_rows]]
+    initial_soil = initial_history[-1].soil_moisture
+    initial_pump = config.pump.to_duty(
+        initial_history[-1].drip * config.step_seconds,
+        config.step_seconds,
+    ) * config.step_seconds
+
+    mpc_result = _rollout_mpc(
+        rows=candidate_rows,
+        initial_soil=initial_soil,
+        initial_pump=initial_pump,
+        initial_history=initial_history,
+        plant_model=plant_model,
+        config=config,
+        beam_width=beam_width,
+    )
+    ampc_result = _rollout_adaptive_mpc(
+        rows=candidate_rows,
+        initial_soil=initial_soil,
+        initial_pump=initial_pump,
+        initial_history=initial_history,
+        plant_model=plant_model,
+        config=config,
+        beam_width=beam_width,
+    )
+    threshold_result = _rollout_threshold(
+        rows=candidate_rows,
+        initial_soil=initial_soil,
+        initial_pump=initial_pump,
+        initial_history=initial_history,
+        plant_model=plant_model,
+        config=config,
+    )
+
+    return SimulationReport(
+        generated_at=utc_now(),
+        input_rows=len(rows),
+        warmup_rows=warmup_rows,
+        simulated_steps=len(candidate_rows),
+        baseline_definition=baseline_definition(config),
+        controllers={
+            "mpc": _metrics(
+                result=mpc_result,
+                previous_pump_seconds=initial_pump,
+                config=config,
+            ),
+            "ampc": _metrics(
+                result=ampc_result,
+                previous_pump_seconds=initial_pump,
+                config=config,
+            ),
+            "threshold": _metrics(
+                result=threshold_result,
+                previous_pump_seconds=initial_pump,
+                config=config,
+            ),
+        },
+    )
+
+
 def read_simulation_csv(path: str | Path) -> tuple[SimulationRow, ...]:
     csv_path = Path(path)
     if not csv_path.exists():
@@ -165,6 +251,7 @@ def _rollout_mpc(
     soils: list[float] = []
     pumps: list[float] = []
     dates: list[date] = []
+    observed_soils: list[float] = []
     safety_counts: dict[str, int] = {}
     daily_usage: dict[datetime.date, float] = {}
 
@@ -211,6 +298,7 @@ def _rollout_mpc(
         soils.append(current_soil)
         pumps.append(pump)
         dates.append(row.timestamp.date())
+        observed_soils.append(row.soil_moisture)
         daily_usage[row.timestamp.date()] = used_today + pump
         previous_pump = pump
 
@@ -218,6 +306,103 @@ def _rollout_mpc(
         soils=tuple(soils),
         pumps=tuple(pumps),
         dates=tuple(dates),
+        observed_soils=tuple(observed_soils),
+        safety_counts=safety_counts,
+    )
+
+
+def _rollout_adaptive_mpc(
+    *,
+    rows: Sequence[SimulationRow],
+    initial_soil: float,
+    initial_pump: float,
+    initial_history: Sequence[PlantRecord],
+    plant_model: PlantModel,
+    config: ControllerConfig,
+    beam_width: int,
+) -> _RolloutResult:
+    solver = GridShootingSolver(config, beam_width=beam_width)
+    estimator = BiasEstimator(
+        config.adaptive,
+        stale_after_seconds=config.safety.stale_after_seconds,
+    )
+    bias_state = BiasState()
+    current_soil = initial_soil
+    previous_pump = initial_pump
+    history = list(initial_history)
+    soils: list[float] = []
+    pumps: list[float] = []
+    dates: list[date] = []
+    observed_soils: list[float] = []
+    safety_counts: dict[str, int] = {}
+    daily_usage: dict[datetime.date, float] = {}
+
+    for row in rows:
+        used_today = daily_usage.get(row.timestamp.date(), 0.0)
+        adaptive_model = BiasCorrectedPlantModel(
+            plant_model,
+            bias=bias_state.current_bias,
+            state_min=config.safety.state_min,
+            state_max=config.safety.state_max,
+        )
+        state = ControllerState(
+            timestamp=row.timestamp,
+            kf_x_posterior=current_soil,
+            temperature=row.temperature,
+            humidity=row.humidity,
+            light=row.light,
+            last_pump_seconds=previous_pump,
+        )
+        recommendation = solver.recommend(
+            state=state,
+            history=history,
+            plant_model=adaptive_model,
+            now=row.timestamp,
+            used_today_pump_seconds=used_today,
+        )
+        pump = recommendation.pump_seconds
+        safety_counts[recommendation.safety_status] = (
+            safety_counts.get(recommendation.safety_status, 0) + 1
+        )
+        current_soil = _predict_next(
+            current_soil=current_soil,
+            row=row,
+            pump_seconds=pump,
+            history=history,
+            plant_model=adaptive_model,
+            config=config,
+        )
+        update = estimator.observe(
+            bias_state,
+            predicted=current_soil,
+            observed=row.soil_moisture,
+            observed_at=row.timestamp,
+            now=row.timestamp,
+        )
+        bias_state = update.state
+        history.append(
+            PlantRecord(
+                soil_moisture=current_soil,
+                temperature=row.temperature,
+                humidity=row.humidity,
+                light=row.light,
+                drip=config.pump.to_duty(pump, config.step_seconds),
+                mist=row.mist,
+                fan=row.fan,
+            )
+        )
+        soils.append(current_soil)
+        pumps.append(pump)
+        dates.append(row.timestamp.date())
+        observed_soils.append(row.soil_moisture)
+        daily_usage[row.timestamp.date()] = used_today + pump
+        previous_pump = pump
+
+    return _RolloutResult(
+        soils=tuple(soils),
+        pumps=tuple(pumps),
+        dates=tuple(dates),
+        observed_soils=tuple(observed_soils),
         safety_counts=safety_counts,
     )
 
@@ -237,6 +422,7 @@ def _rollout_threshold(
     soils: list[float] = []
     pumps: list[float] = []
     dates: list[date] = []
+    observed_soils: list[float] = []
 
     for row in rows:
         pump = threshold_baseline_pump_seconds(current_soil, config)
@@ -262,12 +448,14 @@ def _rollout_threshold(
         soils.append(current_soil)
         pumps.append(pump)
         dates.append(row.timestamp.date())
+        observed_soils.append(row.soil_moisture)
         previous_pump = pump
 
     return _RolloutResult(
         soils=tuple(soils),
         pumps=tuple(pumps),
         dates=tuple(dates),
+        observed_soils=tuple(observed_soils),
         safety_counts={"not_applicable": len(pumps)},
     )
 
@@ -322,6 +510,7 @@ def _metrics(
         previous_pump_seconds=previous_pump_seconds,
         config=config,
     )
+    observation_errors = _observation_errors(result)
     return SimulationMetrics(
         band_violation_steps=sum(1 for error in violation_errors if error > 0.0),
         band_violation_seconds=sum(
@@ -337,6 +526,10 @@ def _metrics(
         cost_breakdown=cost_breakdown(cost),
         final_soil_moisture=result.soils[-1],
         safety_counts=result.safety_counts,
+        mean_absolute_observation_error=(
+            sum(observation_errors) / len(observation_errors)
+        ),
+        max_absolute_observation_error=max(observation_errors),
     )
 
 
@@ -352,6 +545,17 @@ def _switching_count(
             count += 1
         previous = pump
     return count
+
+
+def _observation_errors(result: _RolloutResult) -> tuple[float, ...]:
+    if len(result.soils) != len(result.observed_soils):
+        raise ValueError("simulated and observed soil sequences must align")
+    if not result.soils:
+        raise ValueError("trajectory must not be empty")
+    return tuple(
+        abs(predicted - observed)
+        for predicted, observed in zip(result.soils, result.observed_soils)
+    )
 
 
 def _score_with_daily_reset(
@@ -372,9 +576,14 @@ def _score_with_daily_reset(
     band_total = 0.0
     water_total = 0.0
     switching_total = 0.0
-    daily_cap_total = 0.0
     previous_pump = previous_pump_seconds
     daily_usage: dict[date, float] = {}
+    max_pump_seconds = config.pump.max_seconds
+    daily_cap_seconds = config.safety.soft_daily_pump_cap_seconds
+    if max_pump_seconds <= 0.0:
+        raise ValueError("pump.max_seconds must be > 0")
+    if daily_cap_seconds <= 0.0:
+        raise ValueError("soft daily cap must be > 0")
 
     for value, pump, day in zip(predictions, pump_seconds, dates):
         if not isfinite(value):
@@ -389,24 +598,27 @@ def _score_with_daily_reset(
             low=config.target_band.low,
             high=config.target_band.high,
         )
-        pump_ratio = pump / float(config.step_seconds)
-        switch_ratio = abs(pump - previous_pump) / float(config.step_seconds)
+        pump_ratio = pump / max_pump_seconds
+        switch_ratio = abs(pump - previous_pump) / max_pump_seconds
         cumulative_today = daily_usage.get(day, 0.0) + pump
         daily_usage[day] = cumulative_today
-        daily_excess_ratio = max(
-            0.0,
-            cumulative_today - config.safety.soft_daily_pump_cap_seconds,
-        ) / float(config.step_seconds)
 
         band_total += config.cost.band_violation * error * error
         water_total += config.cost.water_use * pump_ratio * pump_ratio
         switching_total += config.cost.switching * switch_ratio * switch_ratio
+        previous_pump = pump
+
+    daily_cap_total = 0.0
+    for cumulative_today in daily_usage.values():
+        daily_excess_ratio = max(
+            0.0,
+            cumulative_today - daily_cap_seconds,
+        ) / daily_cap_seconds
         daily_cap_total += (
             config.cost.daily_cap_excess
             * daily_excess_ratio
             * daily_excess_ratio
         )
-        previous_pump = pump
 
     terminal_error = band_error(
         predictions[-1],
@@ -460,6 +672,12 @@ def _required_float(row: dict[str, str], column: str) -> float:
     if not isfinite(value):
         raise ValueError(f"{column} must be finite")
     return value
+
+
+def _adaptive_enabled_config(config: ControllerConfig) -> ControllerConfig:
+    if config.adaptive.enabled:
+        return config
+    return replace(config, adaptive=replace(config.adaptive, enabled=True))
 
 
 def _optional_float(row: dict[str, str], column: str) -> float:

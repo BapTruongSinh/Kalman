@@ -49,9 +49,14 @@ def score_trajectory(
     band_total = 0.0
     water_total = 0.0
     switching_total = 0.0
-    daily_cap_total = 0.0
-    cumulative_pump = used_today_pump_seconds
+    planned_pump = 0.0
     previous_pump = previous_pump_seconds
+    max_pump_seconds = config.pump.max_seconds
+    daily_cap_seconds = config.safety.soft_daily_pump_cap_seconds
+    if max_pump_seconds <= 0.0:
+        raise ValueError("pump.max_seconds must be > 0")
+    if daily_cap_seconds <= 0.0:
+        raise ValueError("soft daily cap must be > 0")
 
     for value, pump in zip(predictions, pump_seconds):
         if not isfinite(value):
@@ -66,23 +71,24 @@ def score_trajectory(
             low=config.target_band.low,
             high=config.target_band.high,
         )
-        pump_ratio = pump / float(config.step_seconds)
-        switch_ratio = abs(pump - previous_pump) / float(config.step_seconds)
-        cumulative_pump += pump
-        daily_excess_ratio = max(
-            0.0,
-            cumulative_pump - config.safety.soft_daily_pump_cap_seconds,
-        ) / float(config.step_seconds)
+        pump_ratio = pump / max_pump_seconds
+        switch_ratio = abs(pump - previous_pump) / max_pump_seconds
+        planned_pump += pump
 
         band_total += config.cost.band_violation * error * error
         water_total += config.cost.water_use * pump_ratio * pump_ratio
         switching_total += config.cost.switching * switch_ratio * switch_ratio
-        daily_cap_total += (
-            config.cost.daily_cap_excess
-            * daily_excess_ratio
-            * daily_excess_ratio
-        )
         previous_pump = pump
+
+    daily_excess_ratio = max(
+        0.0,
+        used_today_pump_seconds + planned_pump - daily_cap_seconds,
+    ) / daily_cap_seconds
+    daily_cap_total = (
+        config.cost.daily_cap_excess
+        * daily_excess_ratio
+        * daily_excess_ratio
+    )
 
     terminal_error = band_error(
         predictions[-1],

@@ -38,7 +38,8 @@ Kalman posterior/raw state
 | `mpc.simulation` | Offline simulation and baseline comparison |
 | `mpc.adaptive` | Bias estimator and AMPC wrapper |
 | `mpc.actuator.http` | HTTP command adapter and fail-safe |
-| `mpc.cli` | `simulate`, `recommend`, `adaptive-simulate`, `closed-loop` |
+| `mpc.closed_loop` | Closed-loop service that combines solver, safety, and actuator result |
+| `mpc.cli` | `simulate`, `recommend`, `adaptive-simulate`, `closed-loop`, `auto`, `config-schema` |
 
 ## 3.1 Package Layout Chốt Cho V2/V3
 
@@ -88,6 +89,7 @@ Boundary rules:
 - `mpc.solver.grid` chỉ phụ thuộc plant interface và config; không biết CLI, HTTP, Django, hoặc file path.
 - `mpc.simulation` được đọc CSV/JSON fixture và so sánh threshold baseline, nhưng v2 không ghi DB.
 - `mpc.actuator.http` chỉ thuộc v3 và nằm sau adapter để fake actuator test thay thế được.
+- `mpc.closed_loop` không biết token thô trong output; token chỉ đi từ env vào HTTP header.
 
 ## 3.2 Public Contracts
 
@@ -121,7 +123,7 @@ state source
   -> AMPC bias correction
   -> MPC recommendation
   -> safety gate
-  -> HTTP POST command if safe and config explicit
+  -> HTTP POST command if config explicit
   -> pump off + alert/log otherwise
 ```
 
@@ -132,6 +134,7 @@ state source
 - Missing state/model/solver/HTTP failure: pump off.
 - Bearer token and actuator URL never committed.
 - Fake actuator tests required before real pilot.
+- Auto execute only runs when `actuator.enabled=true`, URL exists, token env name exists, and the env token is present.
 
 ## 6. CLI Layout
 
@@ -139,7 +142,9 @@ state source
 |---------|-------|-------|--------|
 | `python -m mpc recommend` | V2 | state JSON, optional history JSON, config, ARX artifact | recommendation JSON |
 | `python -m mpc simulate` | V2 | CSV trace, config, ARX artifact | simulation report JSON |
-| `python -m mpc adaptive-simulate` | V3 | same as simulate plus residual window | comparison report JSON |
+| `python -m mpc adaptive-simulate` | V3 | same as simulate plus residual window | comparison report JSON with `mpc`, `ampc`, `threshold` |
 | `python -m mpc closed-loop` | V3 | state source, config, actuator config | HTTP command hoặc pump-off fail-safe |
+| `python -m mpc auto` | V3 | same as closed-loop, with default demo paths when omitted | HTTP command hoặc pump-off fail-safe |
+| `python -m mpc config-schema` | V2/V3 | none | website-loadable defaults and field groups |
 
 V2 commands phải chạy không cần Django, database, SciPy, hoặc CVXPY.

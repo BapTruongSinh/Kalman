@@ -77,6 +77,72 @@ Default config được định nghĩa ở [`CONFIG.md`](./CONFIG.md). Các fiel
 
 V2 grid candidates là `0, 30, 60, ..., 300` giây bơm. Runtime hiện dùng deterministic beam-grid shooting để tránh enumerate toàn bộ `11^12` horizon; mặc định giữ 32 sequence tốt nhất mỗi bước. Solver trả lệnh đầu tiên của sequence có cost thấp nhất trong beam đã xét. Với horizon nhỏ hoặc `beam_width` đủ lớn, kết quả trùng exhaustive grid search.
 
+CLI có thể chạy với default khi bỏ trống path:
+
+```powershell
+python -m mpc recommend
+python -m mpc simulate --max-steps 288
+python -m mpc adaptive-simulate --max-steps 288
+python -m mpc auto
+```
+
+Default runtime path nằm trong `mpc.schema.DEFAULT_RUNTIME_PATHS`: artifact `../ARX/arx_model.json`, state demo `examples/demo_state.json`, simulation input `../ARX/greenhouse_data.csv`, và output trong `reports/`.
+
+## 2.1.1 Config Schema Output
+
+`python -m mpc config-schema` xuất JSON để website load default và render form cấu hình:
+
+```json
+{
+  "schema_version": 1,
+  "controller_defaults": {
+    "step_seconds": 300,
+    "horizon_steps": 12,
+    "target_band": {"low": 55.0, "high": 65.0}
+  },
+  "runtime_defaults": {
+    "artifact": "../ARX/arx_model.json",
+    "state_json": "examples/demo_state.json",
+    "simulation_input": "../ARX/greenhouse_data.csv",
+    "beam_width": 32,
+    "max_steps": null
+  },
+  "field_groups": {
+    "user_inputs": [
+      {"name": "target_band.low", "type": "number"},
+      {"name": "target_band.high", "type": "number"},
+      {"name": "pump.max_seconds", "type": "number"},
+      {"name": "safety.soft_daily_pump_cap_seconds", "type": "number"},
+      {"name": "crop.kc", "type": "number", "runtime_field": false}
+    ],
+    "system_defaults": [
+      {"name": "cost.water_use", "type": "number"},
+      {"name": "cost.switching", "type": "number"},
+      {"name": "beam_width", "type": "integer"}
+    ]
+  }
+}
+```
+
+`crop.kc` được xuất để website có chỗ lưu/hiển thị hệ số cây trồng, nhưng MPC runtime hiện chưa dùng trực tiếp field này. Token actuator thật không xuất hiện trong schema; schema chỉ cho phép cấu hình tên biến môi trường `actuator.bearer_token_env`.
+
+## 2.1.2 Objective Cost
+
+Objective cost dùng band tracking theo độ lệch khỏi band. Water và switching normalize bằng `pump.max_seconds`; soft daily cap normalize bằng `soft_daily_pump_cap_seconds` theo tổng planned pump seconds trong horizon:
+
+```text
+J =
+sum_i [
+  w_band * band_error_i^2
+  + w_water * (u_i / u_max)^2
+  + w_switch * ((u_i - u_{i-1}) / u_max)^2
+]
++ w_daily * daily_excess_ratio^2
++ w_terminal * band_error_H^2
+```
+
+`band_error_i = max(0, target_low - theta_i) + max(0, theta_i - target_high)`.
+
 ## 2.2 Simulation Report Output
 
 `python -m mpc simulate` ghi JSON report có dạng:
@@ -110,7 +176,9 @@ V2 grid candidates là `0, 30, 60, ..., 300` giây bơm. Runtime hiện dùng de
         "daily_cap": 0.0
       },
       "final_soil_moisture": 60.0,
-      "safety_counts": {"safe": 288}
+      "safety_counts": {"safe": 288},
+      "mean_absolute_observation_error": 0.0,
+      "max_absolute_observation_error": 0.0
     },
     "threshold": {
       "band_violation_steps": 0,
@@ -127,13 +195,38 @@ V2 grid candidates là `0, 30, 60, ..., 300` giây bơm. Runtime hiện dùng de
         "daily_cap": 0.0
       },
       "final_soil_moisture": 60.0,
-      "safety_counts": {"not_applicable": 288}
+      "safety_counts": {"not_applicable": 288},
+      "mean_absolute_observation_error": 0.0,
+      "max_absolute_observation_error": 0.0
     }
   }
 }
 ```
 
 Threshold baseline được định nghĩa rõ: nếu độ ẩm đất hiện tại thấp hơn `target_band.low` thì bơm `pump.max_seconds`; ngược lại bơm `pump.min_seconds`.
+
+## 2.3 Adaptive Simulation Report Output
+
+`python -m mpc adaptive-simulate` ghi cùng schema report với `simulate`, nhưng `controllers` có thêm `ampc` để so sánh trực tiếp v2 MPC và v3 AMPC:
+
+```json
+{
+  "controllers": {
+    "mpc": {"mean_absolute_observation_error": 5.0},
+    "ampc": {"mean_absolute_observation_error": 1.25},
+    "threshold": {"mean_absolute_observation_error": 5.0}
+  },
+  "config": {
+    "adaptive": {
+      "enabled": true,
+      "bias_window": 12,
+      "max_abs_bias": 5.0
+    }
+  }
+}
+```
+
+`ampc` dùng bias correction từ residual gần đây trước khi forecast horizon. Residual thiếu, stale, hoặc outlier bị bỏ qua; khi bị bỏ qua, lệnh bơm vẫn đi qua solver/safety boundary như MPC v2.
 
 ## 3. Actuator Payload (v3)
 
@@ -154,4 +247,48 @@ HTTP:
 
 - Method: `POST`
 - Auth: `Authorization: Bearer <token>`
-- Timeout/retry policy: task #007 sẽ chốt.
+- Timeout: `actuator.timeout_seconds`, mặc định 5 giây.
+- Retry: không retry trong pilot đầu tiên. HTTP lỗi trả fail-closed result và alert.
+- Token không xuất hiện trong output JSON.
+
+## 3.1 Closed-Loop Result Output
+
+`python -m mpc closed-loop` đọc state, solve recommendation, rồi chỉ POST actuator khi `actuator.enabled=true`, `actuator.url` tồn tại, `actuator.bearer_token_env` tồn tại, và env đó có token.
+
+```json
+{
+  "recommendation": {
+    "pump_seconds": 300.0,
+    "step_seconds": 300,
+    "predicted_soil_moisture": [56.0],
+    "target_band": {"low": 55.0, "high": 65.0},
+    "cost": 0.2,
+    "safety_status": "safe",
+    "reason": "below_target_margin"
+  },
+  "actuator": {
+    "executed": true,
+    "status": "sent",
+    "command": {
+      "command_id": "uuid",
+      "timestamp": "2026-05-08T10:00:00+00:00",
+      "run_id": 1,
+      "pump_seconds": 300.0,
+      "step_seconds": 300,
+      "mode": "auto",
+      "reason": "mpc_recommendation_safe",
+      "safety_status": "safe"
+    },
+    "http_status_code": 200,
+    "alert": null,
+    "error": null
+  },
+  "alerts": []
+}
+```
+
+Fail-safe rules:
+
+- Nếu state stale, state thiếu, model lỗi, solver lỗi, hoặc recommendation không `safe`, actuator command dùng `pump_seconds=0.0`.
+- Nếu config actuator thiếu URL/token/env hoặc HTTP POST lỗi, result trả `executed=false`, command fail-closed `pump_seconds=0.0`, `safety_status="actuator_error"`, và `alerts` có lý do.
+- CLI vẫn ghi output JSON cho lỗi fail-safe đã kiểm soát; input JSON/config/artifact hỏng vẫn exit non-zero và không ghi output.

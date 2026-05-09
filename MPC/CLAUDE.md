@@ -1,7 +1,7 @@
 # MPC - Claude Instructions
 
 > Stack: Python package + CLI · ARX artifact reuse · optional HTTP actuator pilot
-> Last updated: 2026-05-08
+> Last updated: 2026-05-09
 
 ## Project Context
 
@@ -50,17 +50,18 @@ Mọi task phải có checklist `## Completion Gates` trong `.tasks/NNN-*.md`:
 
 ## Environment & Commands
 
-Current package status: task #005 added importable `mpc` modules for config, state/history, ARX plant adapter, recommendation output, cost scoring, deterministic beam-grid shooting solver, simulation report, CLI `simulate`/`recommend`, and expanded v2 validation tests.
+Current package status: task #008 documented the runnable v2/v3 demo workflow and validation gates after task #007 added importable `mpc` modules for config, state/history, ARX plant adapter, recommendation output, cost scoring, deterministic beam-grid shooting solver, simulation report, CLI `simulate`/`recommend`/`adaptive-simulate`/`closed-loop`, expanded validation tests, v3 AMPC bias adaptation, and v3 HTTP actuator pilot.
 
 Current solver note: solver is deterministic beam-grid shooting with fail-closed validation. V2 CLI commands run without Django/database.
 
-Hiện tại `MPC/` đã có core package Python cho config/state/plant adapter, recommendation output, cost scoring, deterministic beam-grid solver, simulation report, CLI `simulate`/`recommend`, và validation suite v2.
+Hiện tại `MPC/` đã có core package Python cho config/state/plant adapter, recommendation output, cost scoring, deterministic beam-grid solver, simulation report, CLI `simulate`/`recommend`/`adaptive-simulate`/`closed-loop`, validation suite, bias adaptation v3, và HTTP actuator pilot có fail-safe.
 
 - **Run tests**: `python -m pytest MPC/tests -q`
-- **V2 simulate**: `cd MPC; python -m mpc simulate --artifact ../ARX/arx_model.json --input ../ARX/greenhouse_data.csv --output reports/v2_simulation.json --max-steps 288`
-- **V2 recommend**: `cd MPC; python -m mpc recommend --artifact ../ARX/arx_model.json --state-json state.json --output recommendation.json`
-- **V3 adaptive simulate target**: `python -m mpc adaptive-simulate ...`
-- **V3 closed-loop target**: `python -m mpc closed-loop --config config/closed_loop.json`
+- **V2 simulate**: `cd MPC; python -m mpc simulate --max-steps 288`
+- **V2 recommend**: `cd MPC; python -m mpc recommend`
+- **V3 adaptive simulate**: `cd MPC; python -m mpc adaptive-simulate --max-steps 288`
+- **V3 auto dry check**: `cd MPC; python -m mpc auto`
+- **Config schema**: `cd MPC; python -m mpc config-schema`
 
 ---
 

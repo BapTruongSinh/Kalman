@@ -1,0 +1,8 @@
+{
+  "actuator": {
+    "enabled": false,
+    "url": null,
+    "bearer_token_env": null,
+    "timeout_seconds": 5.0
+  }
+}

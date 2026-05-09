@@ -6,7 +6,7 @@
 
 ## Overview
 
-`MPC/` là project độc lập ở repo root, được tạo để phát triển controller sau khi `Kalman/` đã có live-only estimator. V2 tập trung vào MPC một đầu vào cho bơm nước: nhận state độ ẩm đất từ Kalman posterior hoặc raw sensor fallback, dùng ARX artifact làm plant model, rồi xuất recommendation `pump_seconds`.
+`MPC/` là project độc lập ở repo root, được tạo để phát triển controller sau khi `Kalman/` đã có live-only estimator. V2 nhận state độ ẩm đất từ Kalman posterior hoặc raw sensor fallback, dùng ARX artifact làm plant model, rồi xuất recommendation `pump_seconds`.
 
 V3 mở rộng thành Adaptive MPC bằng cách bù bias dự báo từ sai số gần đây. Closed-loop pilot chỉ được bật khi cấu hình actuator hợp lệ; fail-safe mặc định là tắt bơm và ghi cảnh báo khi input stale, solver lỗi, model lỗi, hoặc actuator API lỗi.
 
@@ -17,7 +17,7 @@ V3 mở rộng thành Adaptive MPC bằng cách bù bias dự báo từ sai số
 | Layer | Technology | Notes |
 |-------|------------|-------|
 | Controller core | Python | Package import được và CLI |
-| Model source | `../ARX/arx_model.json` | Reuse ARX artifact, không train trong MPC v2 |
+| Model source | `../ARX/arx_model.json` | Reuse ARX artifact, không train trong MPC |
 | State source | Kalman posterior / raw sensor fallback | Đọc từ file/state payload trước; DB/API integration để task sau |
 | Solver | Beam-grid shooting | Không thêm SciPy/CVXPY ở v2 |
 | Simulation | CSV + JSON report | So sánh MPC với threshold baseline |
@@ -33,17 +33,15 @@ MPC/
   mpc/
     cli.py
     config.py
+    schema.py
     state.py
     types.py
     plant/
-      arx.py
     solver/
-      cost.py
-      grid.py
     simulation/
-      baseline.py
-      report.py
-      runner.py
+    adaptive/
+    actuator/
+    closed_loop.py
   tests/
   PRD.md
   TODO.md
@@ -51,25 +49,37 @@ MPC/
   README.md
   .tasks/
   docs/
-    technical/
-    user/
-    content/
-    plan/
 ```
-
-Task #001 đã chốt package architecture và config contract. Task #002 đã tạo config/state contracts và ARX plant adapter. Task #003 đã tạo recommendation output, cost scoring, và deterministic beam-grid solver. Task #004 đã tạo CLI `simulate`/`recommend` và baseline simulation report. Task #005 đã mở rộng validation/test suite cho v2.
 
 ---
 
 ## CLI
 
+Chạy từ thư mục `MPC/`:
+
 ```powershell
 cd MPC
-python -m mpc simulate --artifact ..\ARX\arx_model.json --input ..\ARX\greenhouse_data.csv --output reports\v2_simulation.json --max-steps 288
-python -m mpc recommend --artifact ..\ARX\arx_model.json --state-json state.json --output recommendation.json
+python -m mpc recommend
+python -m mpc simulate --max-steps 288
+python -m mpc adaptive-simulate --max-steps 288
+python -m mpc auto
+python -m mpc config-schema
 ```
 
-V3 `adaptive-simulate` và `closed-loop` thuộc task sau.
+Khi bỏ trống path, CLI dùng demo defaults: `..\ARX\arx_model.json`, `examples\demo_state.json`, `..\ARX\greenhouse_data.csv`, và ghi vào `reports\`. Các tham số như `--artifact`, `--state-json`, `--input`, `--output`, `--config`, `--beam-width`, `--max-steps` vẫn override được khi cần test/dev.
+
+`auto` là lệnh runtime ngắn cho closed-loop. Lệnh này chỉ POST actuator khi config explicit hợp lệ. Nếu thiếu URL/token/env hoặc HTTP lỗi, output là fail-closed command `pump_seconds=0.0`.
+
+`config-schema` xuất JSON gồm default controller config, default runtime path, nhóm field người dùng nên nhập, và nhóm field hệ thống có thể giữ mặc định để website load lên form.
+
+---
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `MPC_ACTUATOR_TOKEN` | v3 only | Bearer token gửi actuator command; tên biến này do `actuator.bearer_token_env` trong config chỉ định |
+| `MPC_CONFIG_PATH` | No | Đường dẫn config override nếu không truyền `--config` |
 
 ---
 
@@ -84,18 +94,8 @@ Validation gate chi tiết nằm trong [`docs/technical/VALIDATION.md`](docs/tec
 
 ---
 
-## Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `MPC_ACTUATOR_URL` | v3 only | HTTP endpoint nhận command bơm |
-| `MPC_ACTUATOR_TOKEN` | v3 only | Bearer token gửi actuator command |
-| `MPC_CONFIG_PATH` | No | Đường dẫn config override nếu không dùng default |
-
----
-
 ## Status
 
-Current: task #005 added expanded config, CLI error, simulation regression, and validation-gate coverage for v2.
+Current: task #010 simplified CLI defaults and added config schema export for website-facing configuration.
 
-Core runtime bắt đầu từ task #002; solver/recommendation đã có ở task #003; CLI/simulation đã có ở task #004; v2 validation suite đã có ở task #005; v3 adaptive/closed-loop tiếp tục ở task #006/#007.
+Core runtime bắt đầu từ task #002; solver/recommendation đã có ở task #003; CLI/simulation đã có ở task #004; v2 validation suite đã có ở task #005; v3 adaptive simulation đã có ở task #006; closed-loop HTTP pilot đã có ở task #007; demo/validation docs đã được đồng bộ ở task #008; objective cost đã normalize đúng ở task #009; CLI/schema default đã có ở task #010.

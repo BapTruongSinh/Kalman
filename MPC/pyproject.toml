@@ -9,4 +9,11 @@ description = "Standalone MPC/AMPC controller for the smart greenhouse demo"
 requires-python = ">=3.10"
 
 [tool.setuptools]
-packages = ["mpc", "mpc.plant", "mpc.solver", "mpc.simulation"]
+packages = [
+    "mpc",
+    "mpc.actuator",
+    "mpc.adaptive",
+    "mpc.plant",
+    "mpc.solver",
+    "mpc.simulation",
+]

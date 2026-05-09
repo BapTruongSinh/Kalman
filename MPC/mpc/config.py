@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from math import isfinite
 from pathlib import Path
@@ -115,10 +116,54 @@ class SafetyConfig:
             raise ValueError("safety.state_min must be < safety.state_max")
         if self.stale_after_seconds <= 0:
             raise ValueError("safety.stale_after_seconds must be > 0")
-        if self.soft_daily_pump_cap_seconds < 0.0:
-            raise ValueError("soft daily cap must be >= 0")
+        if self.soft_daily_pump_cap_seconds <= 0.0:
+            raise ValueError("soft daily cap must be > 0")
         if self.fail_closed_pump_seconds != 0.0:
             raise ValueError("fail-closed pump command must remain 0 seconds")
+
+
+@dataclass(frozen=True)
+class AdaptiveConfig:
+    enabled: bool = False
+    bias_window: int = 12
+    max_abs_bias: float = 5.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("adaptive.enabled must be a boolean")
+        if isinstance(self.bias_window, bool) or not isinstance(
+            self.bias_window,
+            int,
+        ):
+            raise ValueError("adaptive.bias_window must be an integer")
+        if self.bias_window < 1:
+            raise ValueError("adaptive.bias_window must be >= 1")
+        _require_finite("adaptive.max_abs_bias", self.max_abs_bias)
+        if self.max_abs_bias < 0.0:
+            raise ValueError("adaptive.max_abs_bias must be >= 0")
+
+
+@dataclass(frozen=True)
+class ActuatorConfig:
+    enabled: bool = False
+    url: str | None = None
+    bearer_token_env: str | None = None
+    timeout_seconds: float = 5.0
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError("actuator.enabled must be a boolean")
+        if self.url is not None and not _non_empty_string(self.url):
+            raise ValueError("actuator.url must be a non-empty string or null")
+        if self.bearer_token_env is not None and not _non_empty_string(
+            self.bearer_token_env,
+        ):
+            raise ValueError(
+                "actuator.bearer_token_env must be a non-empty string or null"
+            )
+        _require_finite("actuator.timeout_seconds", self.timeout_seconds)
+        if self.timeout_seconds <= 0.0:
+            raise ValueError("actuator.timeout_seconds must be > 0")
 
 
 @dataclass(frozen=True)
@@ -129,6 +174,8 @@ class ControllerConfig:
     pump: PumpLimits = field(default_factory=PumpLimits)
     cost: CostWeights = field(default_factory=CostWeights)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
+    adaptive: AdaptiveConfig = field(default_factory=AdaptiveConfig)
+    actuator: ActuatorConfig = field(default_factory=ActuatorConfig)
 
     def __post_init__(self) -> None:
         if self.step_seconds <= 0:
@@ -144,6 +191,8 @@ def controller_config_from_mapping(
     pump_raw = _mapping_or_empty(payload.get("pump"), "pump")
     cost_raw = _mapping_or_empty(payload.get("cost"), "cost")
     safety_raw = _mapping_or_empty(payload.get("safety"), "safety")
+    adaptive_raw = _mapping_or_empty(payload.get("adaptive"), "adaptive")
+    actuator_raw = _mapping_or_empty(payload.get("actuator"), "actuator")
 
     return ControllerConfig(
         step_seconds=_strict_int(
@@ -186,13 +235,42 @@ def controller_config_from_mapping(
                 safety_raw.get("fail_closed_pump_seconds", 0.0)
             ),
         ),
+        adaptive=AdaptiveConfig(
+            enabled=_strict_bool(
+                adaptive_raw.get("enabled", False),
+                "adaptive.enabled",
+            ),
+            bias_window=_strict_int(
+                adaptive_raw.get("bias_window", 12),
+                "adaptive.bias_window",
+            ),
+            max_abs_bias=float(adaptive_raw.get("max_abs_bias", 5.0)),
+        ),
+        actuator=ActuatorConfig(
+            enabled=_strict_bool(
+                actuator_raw.get("enabled", False),
+                "actuator.enabled",
+            ),
+            url=_optional_string(actuator_raw.get("url"), "actuator.url"),
+            bearer_token_env=_optional_string(
+                actuator_raw.get("bearer_token_env"),
+                "actuator.bearer_token_env",
+            ),
+            timeout_seconds=float(actuator_raw.get("timeout_seconds", 5.0)),
+        ),
     )
 
 
+DEFAULT_CONFIG_ENV = "MPC_CONFIG_PATH"
+
+
 def load_controller_config(path: str | Path | None) -> ControllerConfig:
-    if path is None:
+    config_source = path
+    if config_source is None:
+        config_source = os.environ.get(DEFAULT_CONFIG_ENV)
+    if config_source is None:
         return ControllerConfig()
-    config_path = Path(path)
+    config_path = Path(config_source)
     with config_path.open("r", encoding="utf-8-sig") as fh:
         payload = json.load(fh)
     if not isinstance(payload, dict):
@@ -212,3 +290,21 @@ def _strict_int(value: Any, field_name: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"{field_name} must be an integer")
     return value
+
+
+def _strict_bool(value: Any, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a boolean")
+    return value
+
+
+def _optional_string(value: Any, field_name: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field_name} must be a non-empty string or null")
+    return value
+
+
+def _non_empty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
