@@ -1,10 +1,10 @@
 # Green-House Local Server
 
-`Green-House/Green-House-master` is the main local app.
+`Green-House/` is the main local app.
 
 ## Backend
 
-Install local dependencies from `Green-House/Green-House-master/backend`:
+Install local dependencies from `Green-House/backend`:
 
 ```powershell
 python -m pip install -r requirements-local.txt
@@ -21,14 +21,14 @@ python manage.py runserver
 Default ARX artifact path:
 
 ```text
-../../../ARX/arx_model.json
+../../ARX/arx_model.json
 ```
 
 Override with `ARX_MODEL_PATH` in `backend/.env` if needed.
 
 ## Frontend
 
-From `Green-House/Green-House-master/frontend`:
+From `Green-House/frontend`:
 
 ```powershell
 npm install

@@ -2,7 +2,7 @@
 
 ## Goal
 
-Make `Green-House/Green-House-master` the only runtime server so the old `Server/` folder can be removed after review.
+Make `Green-House/` the only runtime server so the old `Server/` folder can be removed after review.
 
 This is a production-scope local migration, not a UI redesign. Green-House keeps its current frontend/API style, but it must own the backend workflow that used to live in `Server/`:
 
@@ -98,14 +98,14 @@ Update references so future agents/users know:
 6. Update docs:
    - `Kalman/README.md`
    - `MPC/README.md`
-   - `Green-House/Green-House-master/backend/README.md`
+   - `Green-House/backend/README.md`
 
 ## Validation
 
 Run:
 
 ```powershell
-cd Green-House\Green-House-master\backend
+cd Green-House\backend
 python manage.py makemigrations --check --dry-run
 python manage.py migrate
 python manage.py check
@@ -122,7 +122,7 @@ python -m pytest MPC\tests -q
 Run frontend check:
 
 ```powershell
-cd Green-House\Green-House-master\frontend
+cd Green-House\frontend
 npm run build
 ```
 

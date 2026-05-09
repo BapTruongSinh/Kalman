@@ -4,6 +4,8 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from django.utils import timezone
+from datetime import timedelta
+from pathlib import Path
 from rest_framework.test import APIClient
 
 from api.models import (
@@ -77,22 +79,25 @@ class GreenHouseServerCutoverTests(TestCase):
         self.assertTrue(cycle.ingest_dedupe_key.startswith(f'live|{self.run.id}|'))
 
     def test_greenhouse_ampc_recommendation_persists_scoped_audit(self):
-        self.client.post(
-            '/api/ingest/samples/',
-            {
-                'run_id': self.run.id,
-                'timestamp': timezone.now().isoformat(),
-                'soil_moisture': 60.0,
-                'temperature': 28.0,
-                'humidity': 70.0,
-                'light': 10000.0,
-                'drip': 0.0,
-                'mist': 0.0,
-                'fan': 0.0,
-            },
-            format='json',
-            HTTP_X_DEVICE_TOKEN=settings.INGEST_DEVICE_TOKEN,
-        )
+        self.assertTrue(Path(settings.ARX_MODEL_PATH).exists(), settings.ARX_MODEL_PATH)
+        now = timezone.now()
+        for index in range(3):
+            self.client.post(
+                '/api/ingest/samples/',
+                {
+                    'run_id': self.run.id,
+                    'timestamp': (now - timedelta(minutes=(2 - index) * 5)).isoformat(),
+                    'soil_moisture': 60.0 + index,
+                    'temperature': 28.0,
+                    'humidity': 70.0,
+                    'light': 10000.0,
+                    'drip': 0.0,
+                    'mist': 0.0,
+                    'fan': 0.0,
+                },
+                format='json',
+                HTTP_X_DEVICE_TOKEN=settings.INGEST_DEVICE_TOKEN,
+            )
 
         response = self.client.post(f'/api/greenhouses/{self.greenhouse.id}/ampc/recommendations/', {}, format='json')
         self.assertIn(response.status_code, {200, 202})
@@ -100,6 +105,9 @@ class GreenHouseServerCutoverTests(TestCase):
         audit = AMPCRecommendation.objects.get(id=response.json()['id'])
         self.assertEqual(audit.greenhouse_id, self.greenhouse.id)
         self.assertEqual(audit.run_id, self.run.id)
+        self.assertNotEqual(audit.safety_status, 'model_error')
+        self.assertNotIn('artifact not found', audit.reason.lower())
+        self.assertGreater(len(audit.predicted_soil_moisture), 0)
         self.assertFalse(audit.command_created)
 
     def test_pipeline_cycles_is_not_a_runtime_table(self):

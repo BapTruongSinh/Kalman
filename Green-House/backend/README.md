@@ -8,7 +8,7 @@ pip install -r requirements-local.txt
 Copy-Item .env.example .env
 ```
 
-`requirements-local.txt` installs the Django backend plus editable local packages from `../../../Kalman` and `../../../MPC`. Use `requirements.txt` only for the base Django dependencies.
+`requirements-local.txt` installs the Django backend plus editable local packages from `../../Kalman` and `../../MPC`. Use `requirements.txt` only for the base Django dependencies.
 
 ## 3. Khởi tạo project
 ```powershell

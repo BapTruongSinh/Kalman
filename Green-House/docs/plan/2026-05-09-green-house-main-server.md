@@ -2,7 +2,7 @@
 
 ## Goal
 
-`Green-House/Green-House-master` is the main local app. `Server/` remains only as reference. The Green-House backend keeps its existing auth, dashboard, sensor, device, alert, and ingest API while adding Kalman estimation and AMPC control backed by `ARX/arx_model.json`.
+`Green-House/` is the main local app. `Server/` remains only as reference. The Green-House backend keeps its existing auth, dashboard, sensor, device, alert, and ingest API while adding Kalman estimation and AMPC control backed by `ARX/arx_model.json`.
 
 ## Scope
 
@@ -32,7 +32,7 @@
 ## Validation
 
 - Backend:
-  - `cd Green-House/Green-House-master/backend`
+  - `cd Green-House/backend`
   - `python manage.py makemigrations api`
   - `python manage.py migrate`
   - `python manage.py check`
@@ -40,7 +40,7 @@
   - `python -m pytest Kalman/tests -q`
   - `python -m pytest MPC/tests -q`
 - Frontend:
-  - `cd Green-House/Green-House-master/frontend`
+  - `cd Green-House/frontend`
   - `npm run build`
 
 ## Notes

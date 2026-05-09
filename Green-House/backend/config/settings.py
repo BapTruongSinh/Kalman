@@ -112,7 +112,7 @@ INGEST_DEVICE_TOKEN = os.getenv('INGEST_DEVICE_TOKEN', 'esp32-local-token')
 APP_ZONE_ID = 1
 ARX_MODEL_PATH = os.getenv(
     'ARX_MODEL_PATH',
-    str(BASE_DIR.parent.parent.parent / 'ARX' / 'arx_model.json'),
+    str(BASE_DIR.parent.parent / 'ARX' / 'arx_model.json'),
 )
 APP_ZONE_NAME = 'Nhà kính chính'
 
