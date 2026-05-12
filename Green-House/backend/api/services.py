@@ -16,6 +16,8 @@ from .serializers import (
     KNOWN_SENSOR_ERROR_KEYS,
     MANUAL_REASON_MAX_LENGTH,
     DeviceCommandSerializer,
+    validate_json_finite,
+    validate_sensor_numeric_fields,
 )
 
 
@@ -43,7 +45,7 @@ def _clean_sensor_errors(value) -> dict:
         raise ValidationError({
             'sensor_errors': f"sensor_errors only supports keys: {', '.join(sorted(KNOWN_SENSOR_ERROR_KEYS))}"
         })
-    return value
+    return validate_json_finite(value, 'sensor_errors')
 
 
 def get_controller(device_code: str = 'esp32-main', *, greenhouse: Greenhouse | None = None) -> Device:
@@ -95,6 +97,7 @@ def sync_device_online(device: Device, firmware_version: str | None = None, meta
         update_fields.append('firmware_version')
 
     if metadata:
+        metadata = validate_json_finite(metadata, 'metadata')
         device.metadata = {**device.metadata, **metadata}
         update_fields.append('metadata')
 
@@ -365,6 +368,31 @@ def sync_sensor_alerts(payload: dict, device_code: str = 'esp32-main', *, greenh
 
 
 def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main', *, greenhouse: Greenhouse | None = None):
+    validate_sensor_numeric_fields(payload)
+    sensor_payload = validate_json_finite(payload.get('payload') or {}, 'payload')
+    metadata = validate_json_finite(payload.get('metadata') or {}, 'metadata')
+    sensor_errors = _clean_sensor_errors(payload.get('sensor_errors'))
+    device_states = validate_json_finite(payload.get('device_states') or {}, 'device_states')
+    firmware_version = _clean_limited_text(
+        'firmware_version',
+        payload.get('firmware_version'),
+        DEVICE_FIRMWARE_MAX_LENGTH,
+    )
+    manual_reason = _clean_limited_text(
+        'manual_reason',
+        payload.get('manual_reason'),
+        MANUAL_REASON_MAX_LENGTH,
+    )
+    payload = {**payload}
+    payload['payload'] = sensor_payload
+    payload['metadata'] = metadata
+    payload['sensor_errors'] = sensor_errors
+    payload['device_states'] = device_states
+    if firmware_version:
+        payload['firmware_version'] = firmware_version
+    if manual_reason:
+        payload['manual_reason'] = manual_reason
+
     recorded_raw = payload.get('recorded_at')
     recorded_at = parse_datetime(recorded_raw) if isinstance(recorded_raw, str) else recorded_raw
     recorded_at = recorded_at or timezone.now()
@@ -375,12 +403,11 @@ def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main', *, gre
         humidity=payload.get('humidity'),
         light=payload.get('light'),
         soil_moisture=payload.get('soil_moisture'),
-        payload=payload.get('payload') or {},
+        payload=sensor_payload,
         recorded_at=recorded_at,
     )
 
     controller = get_controller(device_code=device_code, greenhouse=greenhouse)
-    metadata = payload.get('metadata') or {}
     metadata = {**metadata, 'transport': 'websocket'}
     sync_device_online(
         controller,
@@ -391,7 +418,7 @@ def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main', *, gre
     sync_control_mode_from_payload(payload, greenhouse=greenhouse)
     sync_sensor_alerts(payload, device_code=device_code, greenhouse=greenhouse)
 
-    states = payload.get('device_states') or {}
+    states = device_states
     state_map = {'fan_on': 'fan', 'pump_on': 'pump', 'light_on': 'light'}
 
     for field_name, device_type in state_map.items():
@@ -420,12 +447,32 @@ def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main', *, gre
 
 
 def ingest_heartbeat_payload(payload: dict, device_code: str = 'esp32-main', *, greenhouse: Greenhouse | None = None):
+    metadata = validate_json_finite(payload.get('metadata') or {}, 'metadata')
+    sensor_errors = _clean_sensor_errors(payload.get('sensor_errors'))
+    firmware_version = _clean_limited_text(
+        'firmware_version',
+        payload.get('firmware_version'),
+        DEVICE_FIRMWARE_MAX_LENGTH,
+    )
+    manual_reason = _clean_limited_text(
+        'manual_reason',
+        payload.get('manual_reason'),
+        MANUAL_REASON_MAX_LENGTH,
+    )
+    payload = {**payload}
+    payload['metadata'] = metadata
+    payload['sensor_errors'] = sensor_errors
+    if firmware_version:
+        payload['firmware_version'] = firmware_version
+    if manual_reason:
+        payload['manual_reason'] = manual_reason
+
     controller = get_controller(device_code=device_code, greenhouse=greenhouse)
-    metadata = payload.get('metadata') or {}
     metadata = {**metadata, 'uptime_ms': payload.get('uptime_ms'), 'free_heap': payload.get('free_heap')}
+    metadata = validate_json_finite(metadata, 'metadata')
     sync_device_online(
         controller,
-        firmware_version=payload.get('firmware_version'),
+        firmware_version=firmware_version,
         metadata=metadata,
     )
 
@@ -436,11 +483,12 @@ def ingest_heartbeat_payload(payload: dict, device_code: str = 'esp32-main', *, 
 def enqueue_device_command(device: Device, command: str, value: str = '', payload: dict | None = None):
     command = _clean_limited_text('command', command, DEVICE_COMMAND_TEXT_MAX_LENGTH)
     value = _clean_limited_text('value', value, DEVICE_COMMAND_TEXT_MAX_LENGTH)
+    payload = validate_json_finite(payload or {}, 'payload')
     cmd = DeviceCommand.objects.create(
         device=device,
         command=command,
         value=value,
-        payload=payload or {},
+        payload=payload,
     )
     return cmd
 

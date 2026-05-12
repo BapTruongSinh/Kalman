@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone as datetime_timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 from rest_framework_simplejwt.tokens import AccessToken
 
@@ -29,6 +30,7 @@ from api.ampc import run_auto_recommendation
 from api.ampc_scheduler import get_scheduler_state, run_due_once
 from api.et0 import ET0Failure, ET0Reading
 from api.estimation import ensure_estimation_for_reading, latest_estimation
+from api.services import ingest_sensor_payload
 
 
 @override_settings(INGEST_DEVICE_TOKEN='test-ingest-token')
@@ -629,6 +631,61 @@ class GreenHouseServerCutoverTests(TestCase):
         self.assertEqual(SensorData.objects.count(), 0)
         self.assertEqual(EstimationCycle.objects.count(), 0)
 
+    def test_ingest_samples_rejects_non_finite_actuator_payload(self):
+        response = self.client.post(
+            '/api/ingest/samples/',
+            data=(
+                f'{{"run_id": {self.run.id},'
+                f'"timestamp": "{timezone.now().isoformat()}",'
+                '"soil_moisture": 60.0,'
+                '"temperature": 28.0,'
+                '"humidity": 70.0,'
+                '"light": 10000.0,'
+                '"drip": 1e309,'
+                '"mist": 0.0,'
+                '"fan": 0.0}'
+            ),
+            content_type='application/json',
+            HTTP_X_DEVICE_TOKEN=settings.INGEST_DEVICE_TOKEN,
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('drip', response.json())
+        self.assertEqual(SensorData.objects.count(), 0)
+        self.assertEqual(EstimationCycle.objects.count(), 0)
+
+    def test_reading_ingest_rejects_non_finite_nested_json_payloads(self):
+        cases = [
+            ('"payload": {"drip": 1e309}', 'payload'),
+            ('"metadata": {"bad": 1e309}', 'metadata'),
+            ('"sensor_errors": {"dht": 1e309}', 'sensor_errors'),
+        ]
+
+        for override, field in cases:
+            with self.subTest(field=field):
+                response = self.client.post(
+                    '/api/ingest/readings/',
+                    data=(
+                        '{"recorded_at": "' + timezone.now().isoformat() + '",'
+                        '"soil_moisture": 60.0,'
+                        '"temperature": 28.0,'
+                        '"humidity": 70.0,'
+                        '"light": 10000.0,'
+                        f'{override}' +
+                        '}'
+                    ),
+                    content_type='application/json',
+                    HTTP_X_DEVICE_TOKEN=settings.INGEST_DEVICE_TOKEN,
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.json())
+
+        self.assertEqual(SensorData.objects.count(), 0)
+        self.assertEqual(EstimationCycle.objects.count(), 0)
+        self.assertEqual(Device.objects.count(), 0)
+        self.assertEqual(Alert.objects.count(), 0)
+
     def test_ingest_heartbeat_rejects_oversized_text_payload(self):
         cases = [
             ({'firmware_version': 'v' * 51}, 'firmware_version'),
@@ -720,6 +777,26 @@ class GreenHouseServerCutoverTests(TestCase):
         self.assertEqual(DeviceState.objects.count(), 0)
         self.assertEqual(ControlState.objects.count(), 0)
 
+    def test_device_command_rejects_non_finite_nested_payload(self):
+        pump = Device.objects.create(
+            greenhouse=self.greenhouse,
+            name='Pump',
+            code='pump-main',
+            device_type=Device.DeviceType.PUMP,
+        )
+
+        response = self.client.post(
+            f'/api/devices/{pump.id}/command/',
+            data='{"command": "set_power", "value": "on", "payload": {"bad": 1e309}}',
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('payload', response.json())
+        self.assertEqual(DeviceCommand.objects.count(), 0)
+        self.assertEqual(DeviceState.objects.count(), 0)
+        self.assertEqual(ControlState.objects.count(), 0)
+
     def test_ingest_command_ack_rejects_invalid_status_payload(self):
         controller = Device.objects.create(
             greenhouse=self.greenhouse,
@@ -752,6 +829,37 @@ class GreenHouseServerCutoverTests(TestCase):
         cmd.refresh_from_db()
         self.assertEqual(cmd.status, DeviceCommand.CommandStatus.PENDING)
         self.assertIsNone(cmd.acked_at)
+
+    def test_ingest_sensor_service_rejects_invalid_payload_before_db_write(self):
+        with self.assertRaises(ValidationError):
+            ingest_sensor_payload(
+                {
+                    'recorded_at': timezone.now(),
+                    'soil_moisture': 100000.0,
+                    'temperature': 28.0,
+                    'humidity': 70.0,
+                    'light': 10000.0,
+                    'payload': {'drip': 0.0},
+                },
+                greenhouse=self.greenhouse,
+            )
+
+        with self.assertRaises(ValidationError):
+            ingest_sensor_payload(
+                {
+                    'recorded_at': timezone.now(),
+                    'soil_moisture': 60.0,
+                    'temperature': 28.0,
+                    'humidity': 70.0,
+                    'light': 10000.0,
+                    'metadata': {'bad': float('inf')},
+                },
+                greenhouse=self.greenhouse,
+            )
+
+        self.assertEqual(SensorData.objects.count(), 0)
+        self.assertEqual(Device.objects.count(), 0)
+        self.assertEqual(EstimationCycle.objects.count(), 0)
 
     def test_reading_ingest_missing_soil_does_not_create_usable_kalman_state(self):
         response = self.client.post(

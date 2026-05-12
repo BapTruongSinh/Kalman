@@ -95,6 +95,11 @@ SENSOR_FIELD_BOUNDS = {
     "temperature": (-99.99, 99.99),
     "light": (0.0, 99999999.99),
 }
+ACTUATOR_FIELD_BOUNDS = {
+    "drip": (0.0, 1.0),
+    "mist": (0.0, 1.0),
+    "fan": (0.0, 1.0),
+}
 DEVICE_FIRMWARE_MAX_LENGTH = 50
 DEVICE_COMMAND_TEXT_MAX_LENGTH = 50
 MANUAL_REASON_MAX_LENGTH = 255
@@ -122,8 +127,8 @@ def _finite_runtime_value(instance, attrs, field, defaults):
     return value
 
 
-def _validate_sensor_numeric_fields(attrs):
-    for field, (min_value, max_value) in SENSOR_FIELD_BOUNDS.items():
+def _validate_numeric_bounds(attrs, bounds):
+    for field, (min_value, max_value) in bounds.items():
         value = attrs.get(field)
         if value is None:
             continue
@@ -134,6 +139,33 @@ def _validate_sensor_numeric_fields(attrs):
             raise serializers.ValidationError({
                 field: f"{field} must satisfy {min_value} <= value <= {max_value}"
             })
+
+
+def validate_sensor_numeric_fields(attrs):
+    _validate_numeric_bounds(attrs, SENSOR_FIELD_BOUNDS)
+
+
+def validate_actuator_numeric_fields(attrs):
+    _validate_numeric_bounds(attrs, ACTUATOR_FIELD_BOUNDS)
+
+
+def validate_json_finite(value, field_name: str):
+    def walk(node, path):
+        if isinstance(node, dict):
+            for key, child in node.items():
+                walk(child, f"{path}.{key}")
+            return
+        if isinstance(node, list):
+            for index, child in enumerate(node):
+                walk(child, f"{path}[{index}]")
+            return
+        if isinstance(node, float) and not isfinite(node):
+            raise serializers.ValidationError(
+                {field_name: f"{field_name} contains non-finite number at {path}"}
+            )
+
+    walk(value, field_name)
+    return value
 
 
 def _validate_sensor_error_keys(value):
@@ -620,7 +652,8 @@ class LiveSampleSerializer(serializers.Serializer):
     fan = serializers.FloatField(required=False, allow_null=True)
 
     def validate(self, attrs):
-        _validate_sensor_numeric_fields(attrs)
+        validate_sensor_numeric_fields(attrs)
+        validate_actuator_numeric_fields(attrs)
         return attrs
 
 
@@ -649,11 +682,20 @@ class IngestReadingSerializer(serializers.Serializer):
     )
 
     def validate(self, attrs):
-        _validate_sensor_numeric_fields(attrs)
+        validate_sensor_numeric_fields(attrs)
         return attrs
 
+    def validate_payload(self, value):
+        return validate_json_finite(value, "payload")
+
+    def validate_metadata(self, value):
+        return validate_json_finite(value, "metadata")
+
     def validate_sensor_errors(self, value):
-        return _validate_sensor_error_keys(value)
+        return validate_json_finite(_validate_sensor_error_keys(value), "sensor_errors")
+
+    def validate_device_states(self, value):
+        return validate_json_finite(value, "device_states")
 
 
 class IngestHeartbeatSerializer(serializers.Serializer):
@@ -674,8 +716,11 @@ class IngestHeartbeatSerializer(serializers.Serializer):
         max_length=MANUAL_REASON_MAX_LENGTH,
     )
 
+    def validate_metadata(self, value):
+        return validate_json_finite(value, "metadata")
+
     def validate_sensor_errors(self, value):
-        return _validate_sensor_error_keys(value)
+        return validate_json_finite(_validate_sensor_error_keys(value), "sensor_errors")
 
 
 class ControlModeInputSerializer(serializers.Serializer):
@@ -705,6 +750,9 @@ class DeviceCommandInputSerializer(serializers.Serializer):
         max_length=DEVICE_COMMAND_TEXT_MAX_LENGTH,
     )
     payload = serializers.DictField(required=False)
+
+    def validate_payload(self, value):
+        return validate_json_finite(value, "payload")
 
 
 class DeviceCommandAckInputSerializer(serializers.Serializer):
