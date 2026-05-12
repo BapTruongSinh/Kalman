@@ -9,9 +9,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from rest_framework.test import APIClient
+from rest_framework_simplejwt.tokens import AccessToken
 
 from api.models import (
     AMPCRecommendation,
+    Alert,
     AMPCSchedulerState,
     ControlState,
     Device,
@@ -115,6 +117,224 @@ class GreenHouseServerCutoverTests(TestCase):
 
         response = self.client.get(f'/api/greenhouses/{self.other_greenhouse.id}/control-profile/')
         self.assertEqual(response.status_code, 404)
+
+    def test_legacy_dashboard_sensor_device_alert_endpoints_are_owner_scoped(self):
+        now = timezone.now()
+        owner_controller = Device.objects.create(
+            greenhouse=self.greenhouse,
+            name='Owner ESP32',
+            code='esp32-main',
+            device_type=Device.DeviceType.CONTROLLER,
+            status=Device.DeviceStatus.ONLINE,
+            last_seen_at=now,
+        )
+        other_controller = Device.objects.create(
+            greenhouse=self.other_greenhouse,
+            name='Other ESP32',
+            code='esp32-main',
+            device_type=Device.DeviceType.CONTROLLER,
+            status=Device.DeviceStatus.ONLINE,
+            last_seen_at=now,
+        )
+        owner_fan = Device.objects.create(
+            greenhouse=self.greenhouse,
+            name='Owner Fan',
+            code='fan-shared',
+            device_type=Device.DeviceType.FAN,
+        )
+        other_fan = Device.objects.create(
+            greenhouse=self.other_greenhouse,
+            name='Other Fan',
+            code='fan-shared',
+            device_type=Device.DeviceType.FAN,
+        )
+        owner_reading = SensorData.objects.create(
+            greenhouse=self.greenhouse,
+            recorded_at=now,
+            soil_moisture=61.0,
+            temperature=28.0,
+            humidity=70.0,
+            light=100.0,
+        )
+        SensorData.objects.create(
+            greenhouse=self.other_greenhouse,
+            recorded_at=now + timedelta(minutes=1),
+            soil_moisture=12.0,
+            temperature=40.0,
+            humidity=20.0,
+            light=999.0,
+        )
+        owner_alert = Alert.objects.create(level=Alert.Level.WARNING, title='Owner', message='owner', device=owner_fan)
+        other_alert = Alert.objects.create(level=Alert.Level.ERROR, title='Other', message='other', device=other_fan)
+
+        response = self.client.get('/api/dashboard/overview/')
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload['latest']['id'], owner_reading.id)
+        self.assertEqual(payload['device_count'], 1)
+        self.assertEqual([row['id'] for row in payload['recent_alerts']], [owner_alert.id])
+
+        response = self.client.get('/api/sensor-readings/latest/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['id'], owner_reading.id)
+
+        response = self.client.get('/api/sensor-readings/history/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row['id'] for row in response.json()['items']], [owner_reading.id])
+
+        response = self.client.get('/api/sensor-readings/chart/?metric=soil_moisture&hours=24')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([point['value'] for point in response.json()['points']], [61.0])
+
+        response = self.client.get('/api/devices/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual({row['id'] for row in response.json()}, {owner_controller.id, owner_fan.id})
+        self.assertNotIn(other_controller.id, {row['id'] for row in response.json()})
+
+        response = self.client.get('/api/alerts/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row['id'] for row in response.json()], [owner_alert.id])
+
+        response = self.client.post(f'/api/alerts/{other_alert.id}/mark_read/', {}, format='json')
+        self.assertEqual(response.status_code, 404)
+        response = self.client.post('/api/alerts/mark_all_read/', {}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['updated'], 1)
+        other_alert.refresh_from_db()
+        self.assertFalse(other_alert.is_read)
+
+    def test_device_control_endpoints_are_owner_scoped(self):
+        owner_pump = Device.objects.create(
+            greenhouse=self.greenhouse,
+            name='Owner Pump',
+            code='pump-shared',
+            device_type=Device.DeviceType.PUMP,
+        )
+        other_pump = Device.objects.create(
+            greenhouse=self.other_greenhouse,
+            name='Other Pump',
+            code='pump-shared',
+            device_type=Device.DeviceType.PUMP,
+        )
+
+        response = self.client.post(f'/api/devices/{other_pump.id}/toggle/', {}, format='json')
+        self.assertEqual(response.status_code, 404)
+        response = self.client.post(
+            f'/api/devices/{other_pump.id}/command/',
+            {'command': 'set_power', 'value': 'on'},
+            format='json',
+        )
+        self.assertEqual(response.status_code, 404)
+
+        response = self.client.post(f'/api/devices/{owner_pump.id}/toggle/', {}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(DeviceCommand.objects.get().device_id, owner_pump.id)
+
+    def test_ingest_pending_and_ack_commands_are_scoped_by_controller_token(self):
+        owner_controller = Device.objects.create(
+            greenhouse=self.greenhouse,
+            name='Owner ESP32',
+            code='esp32-main',
+            device_type=Device.DeviceType.CONTROLLER,
+            api_token='owner-controller-token',
+        )
+        other_controller = Device.objects.create(
+            greenhouse=self.other_greenhouse,
+            name='Other ESP32',
+            code='esp32-main',
+            device_type=Device.DeviceType.CONTROLLER,
+            api_token='other-controller-token',
+        )
+        owner_pump = Device.objects.create(
+            greenhouse=self.greenhouse,
+            name='Owner Pump',
+            code='pump-1',
+            device_type=Device.DeviceType.PUMP,
+        )
+        other_pump = Device.objects.create(
+            greenhouse=self.other_greenhouse,
+            name='Other Pump',
+            code='pump-1',
+            device_type=Device.DeviceType.PUMP,
+        )
+        owner_cmd = DeviceCommand.objects.create(device=owner_pump, command='set_power', value='on')
+        other_cmd = DeviceCommand.objects.create(device=other_pump, command='set_power', value='on')
+        esp_client = APIClient(HTTP_HOST='127.0.0.1')
+
+        response = esp_client.get(
+            '/api/ingest/commands/pending/',
+            HTTP_X_DEVICE_TOKEN=owner_controller.api_token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row['id'] for row in response.json()], [owner_cmd.id])
+
+        response = esp_client.get(
+            '/api/ingest/commands/pending/',
+            HTTP_X_DEVICE_TOKEN=other_controller.api_token,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([row['id'] for row in response.json()], [other_cmd.id])
+
+        response = esp_client.post(
+            f'/api/ingest/commands/{other_cmd.id}/ack/',
+            {'status': DeviceCommand.CommandStatus.ACK},
+            format='json',
+            HTTP_X_DEVICE_TOKEN=owner_controller.api_token,
+        )
+        self.assertEqual(response.status_code, 404)
+
+        response = esp_client.post(
+            f'/api/ingest/commands/{owner_cmd.id}/ack/',
+            {'status': DeviceCommand.CommandStatus.ACK},
+            format='json',
+            HTTP_X_DEVICE_TOKEN=owner_controller.api_token,
+        )
+        self.assertEqual(response.status_code, 200)
+        owner_cmd.refresh_from_db()
+        self.assertEqual(owner_cmd.status, DeviceCommand.CommandStatus.ACK)
+
+        response = esp_client.get('/api/ingest/commands/pending/')
+        self.assertEqual(response.status_code, 403)
+
+    def test_websocket_auth_helpers_require_valid_tokens(self):
+        from api.consumer import auth_device_sync, auth_frontend_token_sync
+
+        controller = Device.objects.create(
+            greenhouse=self.greenhouse,
+            name='Owner ESP32',
+            code='esp32-main',
+            device_type=Device.DeviceType.CONTROLLER,
+            api_token='owner-ws-token',
+        )
+
+        self.assertIsNone(auth_device_sync('esp32-main', None))
+        self.assertIsNone(auth_device_sync('esp32-main', settings.INGEST_DEVICE_TOKEN))
+        self.assertIsNone(auth_device_sync('esp32-main', 'bad-token'))
+        self.assertEqual(
+            auth_device_sync('esp32-main', controller.api_token),
+            {'id': controller.id, 'code': controller.code, 'greenhouse_id': self.greenhouse.id},
+        )
+
+        self.assertIsNone(auth_frontend_token_sync(None))
+        self.assertIsNone(auth_frontend_token_sync('bad-jwt'))
+        access = str(AccessToken.for_user(self.user))
+        self.assertEqual(auth_frontend_token_sync(access)['greenhouse_id'], self.greenhouse.id)
+
+    def test_device_code_can_repeat_across_greenhouses(self):
+        Device.objects.create(
+            greenhouse=self.greenhouse,
+            name='Owner Pump',
+            code='shared-device-code',
+            device_type=Device.DeviceType.PUMP,
+        )
+        Device.objects.create(
+            greenhouse=self.other_greenhouse,
+            name='Other Pump',
+            code='shared-device-code',
+            device_type=Device.DeviceType.PUMP,
+        )
+
+        self.assertEqual(Device.objects.filter(code='shared-device-code').count(), 2)
 
     def test_ingest_samples_writes_api_estimationcycle_for_run_and_greenhouse(self):
         response = self.client.post(

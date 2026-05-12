@@ -6,6 +6,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
+from api.ampc import default_greenhouse
 from api.models import Alert, Device, DeviceCommand, DeviceState, SensorData
 
 
@@ -16,8 +17,10 @@ class Command(BaseCommand):
         now_local = timezone.localtime()
         today = now_local.date()
         tz = timezone.get_current_timezone()
+        greenhouse = default_greenhouse()
 
         controller, _ = Device.objects.get_or_create(
+            greenhouse=greenhouse,
             code='esp32-main',
             defaults={
                 'name': 'ESP32 Main',
@@ -26,6 +29,7 @@ class Command(BaseCommand):
             },
         )
         fan, _ = Device.objects.get_or_create(
+            greenhouse=greenhouse,
             code='fan-1',
             defaults={
                 'name': 'Quạt thông gió',
@@ -34,6 +38,7 @@ class Command(BaseCommand):
             },
         )
         pump, _ = Device.objects.get_or_create(
+            greenhouse=greenhouse,
             code='pump-1',
             defaults={
                 'name': 'Máy bơm tưới',
@@ -42,6 +47,7 @@ class Command(BaseCommand):
             },
         )
         light, _ = Device.objects.get_or_create(
+            greenhouse=greenhouse,
             code='light-1',
             defaults={
                 'name': 'Đèn chiếu sáng',
@@ -50,6 +56,7 @@ class Command(BaseCommand):
             },
         )
         mist, _ = Device.objects.get_or_create(
+            greenhouse=greenhouse,
             code='mist-1',
             defaults={
                 'name': 'Máy phun sương',
@@ -97,6 +104,7 @@ class Command(BaseCommand):
             dt = timezone.make_aware(datetime.combine(today, time(hour, minute)), tz)
 
             reading = SensorData.objects.create(
+                greenhouse=greenhouse,
                 temperature=temp,
                 humidity=hum,
                 light=light_pct,

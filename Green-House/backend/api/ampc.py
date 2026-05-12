@@ -476,7 +476,7 @@ def _queue_pump_command(audit: AMPCRecommendation) -> AMPCRecommendation:
     audit.command_created = True
     audit.actuator_status = AMPCRecommendation.ActuatorStatus.QUEUED
     audit.save(update_fields=['device_command', 'command_created', 'actuator_status', 'updated_at'])
-    notify_pending_commands()
+    notify_pending_commands(greenhouse=audit.greenhouse)
     return audit
 
 

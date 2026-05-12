@@ -4,7 +4,6 @@ from datetime import timedelta
 
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-from django.conf import settings
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
@@ -24,18 +23,25 @@ def get_controller(device_code: str = 'esp32-main', *, greenhouse: Greenhouse | 
     if existing is not None:
         return existing
 
+    if greenhouse is not None:
+        legacy = Device.objects.filter(code=device_code, greenhouse__isnull=True).first()
+        if legacy is not None:
+            legacy.greenhouse = greenhouse
+            legacy.save(update_fields=['greenhouse', 'updated_at'])
+            return legacy
+
+    lookup = {'code': device_code}
+    if greenhouse is not None:
+        lookup['greenhouse'] = greenhouse
+
     controller, _ = Device.objects.get_or_create(
-        code=device_code,
+        **lookup,
         defaults={
             'name': 'ESP32 Main',
-            'greenhouse': greenhouse,
             'device_type': Device.DeviceType.CONTROLLER,
             'status': Device.DeviceStatus.OFFLINE,
         },
     )
-    if greenhouse is not None and controller.greenhouse_id is None:
-        controller.greenhouse = greenhouse
-        controller.save(update_fields=['greenhouse', 'updated_at'])
     return controller
 
 
@@ -62,13 +68,16 @@ def sync_device_online(device: Device, firmware_version: str | None = None, meta
         Alert.objects.create(
             level=Alert.Level.SUCCESS,
             title=f'{device.name} online',
-            message=f'{device.name} đã kết nối lại hệ thống.',
+            message=f'{device.name} is back online.',
             device=device,
         )
 
 
-def mark_device_offline(device_code: str = 'esp32-main'):
-    device = Device.objects.filter(code=device_code).first()
+def mark_device_offline(device_code: str = 'esp32-main', *, greenhouse: Greenhouse | None = None):
+    queryset = Device.objects.filter(code=device_code)
+    if greenhouse is not None:
+        queryset = queryset.filter(greenhouse=greenhouse)
+    device = queryset.first()
     if not device:
         return
 
@@ -77,17 +86,21 @@ def mark_device_offline(device_code: str = 'esp32-main'):
         device.save(update_fields=['status', 'updated_at'])
         Alert.objects.create(
             level=Alert.Level.ERROR,
-            title=f'{device.name} mất kết nối',
-            message=f'Kết nối WebSocket từ {device.name} đã ngắt.',
+            title=f'{device.name} offline',
+            message=f'WebSocket connection from {device.name} disconnected.',
             device=device,
         )
 
 
-def refresh_device_statuses(now=None):
+def refresh_device_statuses(now=None, *, greenhouse: Greenhouse | None = None):
     now = now or timezone.now()
     timeout = timedelta(seconds=HEARTBEAT_TIMEOUT_SECONDS)
 
-    for device in Device.objects.all():
+    devices = Device.objects.all()
+    if greenhouse is not None:
+        devices = devices.filter(greenhouse=greenhouse)
+
+    for device in devices:
         previous_status = device.status
 
         if not device.last_seen_at:
@@ -106,23 +119,26 @@ def refresh_device_statuses(now=None):
         if previous_status == Device.DeviceStatus.ONLINE and new_status == Device.DeviceStatus.OFFLINE:
             Alert.objects.create(
                 level=Alert.Level.ERROR,
-                title=f'{device.name} mất kết nối',
-                message=f'Không nhận heartbeat từ {device.name} trong hơn {HEARTBEAT_TIMEOUT_SECONDS} giây.',
+                title=f'{device.name} offline',
+                message=f'No heartbeat from {device.name} for more than {HEARTBEAT_TIMEOUT_SECONDS} seconds.',
                 device=device,
             )
         elif previous_status != Device.DeviceStatus.ONLINE and new_status == Device.DeviceStatus.ONLINE:
             Alert.objects.create(
                 level=Alert.Level.SUCCESS,
                 title=f'{device.name} online',
-                message=f'{device.name} đã kết nối lại hệ thống.',
+                message=f'{device.name} is back online.',
                 device=device,
             )
 
 
-def build_uptime_hint() -> str:
-    refresh_device_statuses()
+def build_uptime_hint(greenhouse: Greenhouse | None = None) -> str:
+    refresh_device_statuses(greenhouse=greenhouse)
 
-    controller = Device.objects.filter(device_type=Device.DeviceType.CONTROLLER).first()
+    controllers = Device.objects.filter(device_type=Device.DeviceType.CONTROLLER)
+    if greenhouse is not None:
+        controllers = controllers.filter(greenhouse=greenhouse)
+    controller = controllers.first()
     if not controller or not controller.last_seen_at:
         return 'Chưa có heartbeat từ ESP32'
 
@@ -145,13 +161,13 @@ def _to_bool(value):
     return str(value).strip().lower() in {'1', 'true', 'on', 'yes'}
 
 
-def _push_ws_message(device_code: str, event_type: str, data: dict):
+def _push_ws_group(group_name: str, event_type: str, data: dict):
     channel_layer = get_channel_layer()
     if not channel_layer:
         return
 
     async_to_sync(channel_layer.group_send)(
-        f'esp32.{device_code}',
+        group_name,
         {
             'type': 'ws_message',
             'event_type': event_type,
@@ -160,26 +176,49 @@ def _push_ws_message(device_code: str, event_type: str, data: dict):
     )
 
 
-def get_pending_commands(limit: int = 5):
-    commands = (
+def get_pending_commands(
+    limit: int = 5,
+    *,
+    device: Device | None = None,
+    greenhouse: Greenhouse | None = None,
+):
+    queryset = (
         DeviceCommand.objects
         .filter(status=DeviceCommand.CommandStatus.PENDING)
         .select_related('device')
-        .order_by('-updated_at', '-id')[:limit]
     )
+    if device is not None and device.device_type != Device.DeviceType.CONTROLLER:
+        queryset = queryset.filter(device=device)
+    elif greenhouse is not None:
+        queryset = queryset.filter(device__greenhouse=greenhouse)
+
+    commands = queryset.order_by('-updated_at', '-id')[:limit]
     return DeviceCommandSerializer(list(reversed(commands)), many=True).data
 
 
-def notify_pending_commands(device_code: str = 'esp32-main'):
-    _push_ws_message(
-        device_code=device_code,
-        event_type='pending_commands',
-        data={'commands': get_pending_commands()},
-    )
+def notify_pending_commands(device_code: str = 'esp32-main', *, greenhouse: Greenhouse | None = None):
+    data = {'commands': get_pending_commands(greenhouse=greenhouse)}
+    controllers = Device.objects.filter(device_type=Device.DeviceType.CONTROLLER)
+    if greenhouse is not None:
+        controllers = controllers.filter(greenhouse=greenhouse)
+
+    delivered = False
+    for controller in controllers:
+        _push_ws_group(f'esp32.device.{controller.id}', 'pending_commands', data)
+        delivered = True
+
+    if not delivered:
+        _push_ws_group(f'esp32.{device_code}', 'pending_commands', data)
 
 
-def _force_manual_mode(reason: str):
-    control, _ = ControlState.objects.get_or_create(singleton_key='main')
+def _force_manual_mode(reason: str, *, greenhouse: Greenhouse | None = None):
+    if greenhouse is None:
+        control, _ = ControlState.objects.get_or_create(singleton_key='main')
+    else:
+        control, _ = ControlState.objects.get_or_create(
+            greenhouse=greenhouse,
+            defaults={'singleton_key': f'greenhouse:{greenhouse.id}'[:20]},
+        )
 
     if control.mode == ControlState.Mode.MANUAL and control.manual_reason == reason:
         return control
@@ -191,12 +230,18 @@ def _force_manual_mode(reason: str):
     return control
 
 
-def sync_control_mode_from_payload(payload: dict):
-    control, _ = ControlState.objects.get_or_create(singleton_key='main')
+def sync_control_mode_from_payload(payload: dict, *, greenhouse: Greenhouse | None = None):
+    if greenhouse is None:
+        control, _ = ControlState.objects.get_or_create(singleton_key='main')
+    else:
+        control, _ = ControlState.objects.get_or_create(
+            greenhouse=greenhouse,
+            defaults={'singleton_key': f'greenhouse:{greenhouse.id}'[:20]},
+        )
 
     sensor_errors = payload.get('sensor_errors') or {}
     if isinstance(sensor_errors, dict) and bool(sensor_errors.get('dht', False)):
-        return _force_manual_mode('dht_sensor_error')
+        return _force_manual_mode('dht_sensor_error', greenhouse=greenhouse)
 
     mode = payload.get('mode')
     auto_mode = payload.get('auto_mode')
@@ -260,20 +305,20 @@ def sync_sensor_alerts(payload: dict, device_code: str = 'esp32-main', *, greenh
         if current_value:
             Alert.objects.create(
                 level=Alert.Level.ERROR,
-                title=sensor_titles.get(sensor_name, f'Cảm biến {sensor_name} lỗi'),
-                message=f'{sensor_titles.get(sensor_name, sensor_name)} trên {controller.name} đang mất dữ liệu hoặc trả giá trị bất thường.',
+                title=f'{sensor_name} sensor error',
+                message=f'{sensor_name} sensor on {controller.name} is missing data or returning invalid values.',
                 device=controller,
             )
         else:
             Alert.objects.create(
                 level=Alert.Level.SUCCESS,
-                title=f'{sensor_titles.get(sensor_name, sensor_name)} đã hồi phục',
-                message=f'Cảm biến {sensor_name} trên {controller.name} đã hoạt động lại bình thường.',
+                title=f'{sensor_name} sensor recovered',
+                message=f'{sensor_name} sensor on {controller.name} has recovered.',
                 device=controller,
             )
 
     if bool(current_errors.get('dht', False)):
-        _force_manual_mode('dht_sensor_error')
+        _force_manual_mode('dht_sensor_error', greenhouse=greenhouse)
 
     if changed:
         metadata['sensor_errors'] = current_errors
@@ -305,7 +350,7 @@ def ingest_sensor_payload(payload: dict, device_code: str = 'esp32-main', *, gre
         metadata=metadata,
     )
 
-    sync_control_mode_from_payload(payload)
+    sync_control_mode_from_payload(payload, greenhouse=greenhouse)
     sync_sensor_alerts(payload, device_code=device_code, greenhouse=greenhouse)
 
     states = payload.get('device_states') or {}
@@ -346,7 +391,7 @@ def ingest_heartbeat_payload(payload: dict, device_code: str = 'esp32-main', *, 
         metadata=metadata,
     )
 
-    sync_control_mode_from_payload(payload)
+    sync_control_mode_from_payload(payload, greenhouse=greenhouse)
     return controller
 
 
@@ -360,13 +405,24 @@ def enqueue_device_command(device: Device, command: str, value: str = '', payloa
     return cmd
 
 
-def ack_device_command_payload(payload: dict):
+def ack_device_command_payload(
+    payload: dict,
+    *,
+    device: Device | None = None,
+    greenhouse: Greenhouse | None = None,
+):
     command_id = payload.get('id') or payload.get('command_id')
     if not command_id:
         return None
 
+    queryset = DeviceCommand.objects.select_related('device')
+    if device is not None and device.device_type != Device.DeviceType.CONTROLLER:
+        queryset = queryset.filter(device=device)
+    elif greenhouse is not None:
+        queryset = queryset.filter(device__greenhouse=greenhouse)
+
     try:
-        cmd = DeviceCommand.objects.select_related('device').get(pk=command_id)
+        cmd = queryset.get(pk=command_id)
     except DeviceCommand.DoesNotExist:
         return None
 
@@ -388,5 +444,9 @@ def ack_device_command_payload(payload: dict):
     state.last_command = cmd.command
     state.last_value = cmd.value
     state.save(update_fields=['is_on', 'desired_on', 'last_command', 'last_value', 'updated_at'])
+
+    cmd.device.status = Device.DeviceStatus.ONLINE
+    cmd.device.last_seen_at = timezone.now()
+    cmd.device.save(update_fields=['status', 'last_seen_at', 'updated_at'])
 
     return cmd

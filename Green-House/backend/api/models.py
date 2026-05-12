@@ -153,7 +153,7 @@ class Device(TimeStampedModel):
         ERROR = 'error', 'Error'
 
     name = models.CharField(max_length=100)
-    code = models.CharField(max_length=50, unique=True)
+    code = models.CharField(max_length=50)
     greenhouse = models.ForeignKey(
         Greenhouse,
         null=True,
@@ -176,6 +176,9 @@ class Device(TimeStampedModel):
 
     class Meta:
         ordering = ['id']
+        constraints = [
+            models.UniqueConstraint(fields=['greenhouse', 'code'], name='uq_device_greenhouse_code'),
+        ]
 
     def save(self, *args, **kwargs):
         if not self.api_token:

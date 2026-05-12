@@ -4,6 +4,8 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.db import DatabaseError, connection
+from django.db.models import Q
+from django.http import Http404
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import generics, permissions, status
@@ -57,8 +59,11 @@ from .ampc_scheduler import (
 )
 from .estimation import ensure_estimation_for_reading, latest_estimation
 from .services import (
+    ack_device_command_payload,
     build_uptime_hint,
     enqueue_device_command,
+    get_pending_commands,
+    ingest_heartbeat_payload,
     ingest_sensor_payload,
     notify_pending_commands,
     refresh_device_statuses,
@@ -69,9 +74,17 @@ def _check_ingest_token(request):
     header = request.headers.get('X-Device-Token') or ''
     auth = request.headers.get('Authorization') or ''
     bearer = auth.replace('Bearer ', '') if auth.startswith('Bearer ') else ''
+    token = header or bearer
 
-    if header == settings.INGEST_DEVICE_TOKEN or bearer == settings.INGEST_DEVICE_TOKEN:
-        return True
+    if not token:
+        raise PermissionDenied('Thiếu X-Device-Token cho ESP32')
+
+    device = Device.objects.select_related('greenhouse').filter(api_token=token, is_enabled=True).first()
+    if device is not None:
+        return device
+
+    if token == settings.INGEST_DEVICE_TOKEN:
+        return None
 
     raise PermissionDenied('Sai X-Device-Token cho ESP32')
 
@@ -168,13 +181,19 @@ def _legacy_auto_settings_patch(data) -> dict:
     return patch
 
 
-def _get_control_state():
-    control, _ = ControlState.objects.get_or_create(singleton_key='main')
+def _get_control_state(greenhouse: Greenhouse | None = None):
+    if greenhouse is None:
+        control, _ = ControlState.objects.get_or_create(singleton_key='main')
+        return control
+    control, _ = ControlState.objects.get_or_create(
+        greenhouse=greenhouse,
+        defaults={'singleton_key': f'greenhouse:{greenhouse.id}'[:20]},
+    )
     return control
 
 
-def _turn_off_all_actuators():
-    actuators = Device.objects.exclude(device_type=Device.DeviceType.CONTROLLER)
+def _turn_off_all_actuators(greenhouse: Greenhouse):
+    actuators = Device.objects.filter(greenhouse=greenhouse).exclude(device_type=Device.DeviceType.CONTROLLER)
 
     for device in actuators:
         state, _ = DeviceState.objects.get_or_create(device=device)
@@ -190,15 +209,46 @@ def _turn_off_all_actuators():
             payload={'source': 'auto_mode_enable'},
         )
 
-    notify_pending_commands()
+    notify_pending_commands(greenhouse=greenhouse)
 
 
-def _esp32_online() -> bool:
-    refresh_device_statuses()
+def _esp32_online(greenhouse: Greenhouse) -> bool:
+    refresh_device_statuses(greenhouse=greenhouse)
     return Device.objects.filter(
+        greenhouse=greenhouse,
         device_type=Device.DeviceType.CONTROLLER,
         status=Device.DeviceStatus.ONLINE,
     ).exists()
+
+
+def _alert_queryset(greenhouse: Greenhouse):
+    return Alert.objects.filter(
+        Q(sensor_data__greenhouse=greenhouse) | Q(device__greenhouse=greenhouse)
+    )
+
+
+def _ingest_greenhouse(request, auth_device: Device | None) -> Greenhouse:
+    greenhouse_id = request.data.get('greenhouse_id') or request.query_params.get('greenhouse_id')
+
+    if auth_device is not None and auth_device.greenhouse_id is not None:
+        if greenhouse_id is not None:
+            try:
+                requested_greenhouse_id = int(greenhouse_id)
+            except (TypeError, ValueError):
+                raise ValidationError({'greenhouse_id': 'greenhouse_id không hợp lệ'})
+            if requested_greenhouse_id != auth_device.greenhouse_id:
+                raise PermissionDenied('Device token không thuộc greenhouse được yêu cầu')
+        return auth_device.greenhouse
+
+    if greenhouse_id is not None:
+        return generics.get_object_or_404(Greenhouse, pk=greenhouse_id, is_active=True)
+
+    return default_greenhouse()
+
+
+def _require_controller_token(device: Device | None) -> None:
+    if device is not None and device.device_type != Device.DeviceType.CONTROLLER:
+        raise PermissionDenied('Endpoint ingest telemetry yêu cầu controller token')
 
 
 class LoginView(TokenObtainPairView):
@@ -208,22 +258,24 @@ class LoginView(TokenObtainPairView):
 
 class DashboardOverviewView(APIView):
     def get(self, request):
-        refresh_device_statuses()
+        greenhouse = default_greenhouse(request.user)
+        refresh_device_statuses(greenhouse=greenhouse)
 
-        esp32_online = _esp32_online()
-        latest = SensorData.objects.order_by('-recorded_at', '-id').first() if esp32_online else None
-        recent_alerts = Alert.objects.order_by('-happened_at', '-id')[:5]
-        control = _get_control_state()
+        esp32_online = _esp32_online(greenhouse)
+        latest = SensorData.objects.filter(greenhouse=greenhouse).order_by('-recorded_at', '-id').first() if esp32_online else None
+        recent_alerts = _alert_queryset(greenhouse).order_by('-happened_at', '-id')[:5]
+        control = _get_control_state(greenhouse)
+        devices = Device.objects.filter(greenhouse=greenhouse)
 
         payload = {
             'latest': SensorDataSerializer(latest).data if latest else None,
             'control': ControlStateSerializer(control).data,
-            'device_count': Device.objects.exclude(device_type=Device.DeviceType.CONTROLLER).count(),
-            'online_devices': Device.objects.exclude(device_type=Device.DeviceType.CONTROLLER).filter(
+            'device_count': devices.exclude(device_type=Device.DeviceType.CONTROLLER).count(),
+            'online_devices': devices.exclude(device_type=Device.DeviceType.CONTROLLER).filter(
                 status=Device.DeviceStatus.ONLINE
             ).count(),
-            'unread_alerts': Alert.objects.filter(is_read=False).count(),
-            'uptime_hint': build_uptime_hint(),
+            'unread_alerts': _alert_queryset(greenhouse).filter(is_read=False).count(),
+            'uptime_hint': build_uptime_hint(greenhouse),
             'recent_alerts': AlertSerializer(recent_alerts, many=True).data,
             'esp32_online': esp32_online,
         }
@@ -232,11 +284,12 @@ class DashboardOverviewView(APIView):
 
 class LatestReadingView(APIView):
     def get(self, request):
-        esp32_online = _esp32_online()
+        greenhouse = default_greenhouse(request.user)
+        esp32_online = _esp32_online(greenhouse)
         if not esp32_online:
             return Response(None)
 
-        latest = SensorData.objects.order_by('-recorded_at', '-id').first()
+        latest = SensorData.objects.filter(greenhouse=greenhouse).order_by('-recorded_at', '-id').first()
         if not latest:
             return Response(None)
         return Response(SensorDataSerializer(latest).data)
@@ -244,13 +297,14 @@ class LatestReadingView(APIView):
 
 class ChartView(APIView):
     def get(self, request):
+        greenhouse = default_greenhouse(request.user)
         metric = request.query_params.get('metric')
         hours = int(request.query_params.get('hours', '24'))
 
         if metric not in {'temperature', 'humidity', 'light', 'soil_moisture'}:
             raise ValidationError('metric không hợp lệ')
 
-        esp32_online = _esp32_online()
+        esp32_online = _esp32_online(greenhouse)
         if not esp32_online:
             return Response({
                 'metric': metric,
@@ -260,7 +314,7 @@ class ChartView(APIView):
         since = timezone.now() - timedelta(hours=hours)
         points = []
 
-        for item in SensorData.objects.filter(recorded_at__gte=since).order_by('recorded_at', 'id'):
+        for item in SensorData.objects.filter(greenhouse=greenhouse, recorded_at__gte=since).order_by('recorded_at', 'id'):
             value = getattr(item, metric, None)
             points.append({'recorded_at': item.recorded_at, 'value': value})
 
@@ -269,10 +323,11 @@ class ChartView(APIView):
 
 class SensorHistoryView(APIView):
     def get(self, request):
+        greenhouse = default_greenhouse(request.user)
         page = max(int(request.query_params.get('page', 1)), 1)
         page_size = min(max(int(request.query_params.get('page_size', 20)), 5), 100)
 
-        queryset = SensorData.objects.order_by('-recorded_at', '-id')
+        queryset = SensorData.objects.filter(greenhouse=greenhouse).order_by('-recorded_at', '-id')
 
         hours_raw = request.query_params.get('hours')
         date_from_raw = request.query_params.get('date_from')
@@ -320,24 +375,26 @@ class SensorHistoryView(APIView):
 
 class ControlStateView(APIView):
     def get(self, request):
-        control = _get_control_state()
+        greenhouse = default_greenhouse(request.user)
+        control = _get_control_state(greenhouse)
         return Response(ControlStateSerializer(control).data)
 
 
 class ControlModeView(APIView):
     def post(self, request):
+        greenhouse = default_greenhouse(request.user)
         mode = str(request.data.get('mode') or '').upper().strip()
         if mode not in {'AUTO', 'MANUAL'}:
             raise ValidationError('mode phải là AUTO hoặc MANUAL')
 
-        control = _get_control_state()
+        control = _get_control_state(greenhouse)
         control.mode = mode
         control.manual_reason = str(request.data.get('reason') or '').strip()
 
         if mode == ControlState.Mode.AUTO:
             control.manual_changed_at = None
             control.save(update_fields=['mode', 'manual_reason', 'manual_changed_at', 'updated_at'])
-            _turn_off_all_actuators()
+            _turn_off_all_actuators(greenhouse)
         else:
             control.manual_changed_at = timezone.now()
             control.save(update_fields=['mode', 'manual_reason', 'manual_changed_at', 'updated_at'])
@@ -613,18 +670,20 @@ class DeviceListView(generics.ListAPIView):
     serializer_class = DeviceSerializer
 
     def get_queryset(self):
-        refresh_device_statuses()
-        return Device.objects.order_by('id')
+        greenhouse = default_greenhouse(self.request.user)
+        refresh_device_statuses(greenhouse=greenhouse)
+        return Device.objects.filter(greenhouse=greenhouse).order_by('id')
 
 
 class DeviceToggleView(APIView):
     def post(self, request, pk: int):
-        device = generics.get_object_or_404(Device, pk=pk)
+        greenhouse = default_greenhouse(request.user)
+        device = generics.get_object_or_404(Device.objects.filter(greenhouse=greenhouse), pk=pk)
 
         if device.device_type == Device.DeviceType.CONTROLLER:
             raise ValidationError('ESP32 Main là bộ điều khiển trung tâm, không hỗ trợ bật/tắt kiểu actuator.')
 
-        control = _get_control_state()
+        control = _get_control_state(greenhouse)
         control.mode = ControlState.Mode.MANUAL
         control.manual_reason = f'manual_toggle:{device.code}'
         control.manual_changed_at = timezone.now()
@@ -638,13 +697,14 @@ class DeviceToggleView(APIView):
         state.save(update_fields=['is_on', 'desired_on', 'last_command', 'last_value', 'updated_at'])
 
         enqueue_device_command(device=device, command='set_power', value=state.last_value)
-        notify_pending_commands()
+        notify_pending_commands(greenhouse=greenhouse)
         return Response(DeviceSerializer(device).data)
 
 
 class DeviceCommandView(APIView):
     def post(self, request, pk: int):
-        device = generics.get_object_or_404(Device, pk=pk)
+        greenhouse = default_greenhouse(request.user)
+        device = generics.get_object_or_404(Device.objects.filter(greenhouse=greenhouse), pk=pk)
         command = (request.data.get('command') or '').strip()
         payload = request.data.get('payload') or {}
         value = str(request.data.get('value') or '')
@@ -655,7 +715,7 @@ class DeviceCommandView(APIView):
         if device.device_type == Device.DeviceType.CONTROLLER:
             raise ValidationError('Không gửi command actuator tới controller trung tâm.')
 
-        control = _get_control_state()
+        control = _get_control_state(greenhouse)
         control.mode = ControlState.Mode.MANUAL
         control.manual_reason = f'manual_command:{device.code}:{command}'
         control.manual_changed_at = timezone.now()
@@ -677,7 +737,7 @@ class DeviceCommandView(APIView):
                 state.desired_on = value.lower() == 'on'
 
         state.save(update_fields=['last_command', 'last_value', 'desired_on', 'updated_at'])
-        notify_pending_commands()
+        notify_pending_commands(greenhouse=greenhouse)
         return Response(DeviceCommandSerializer(cmd).data, status=status.HTTP_201_CREATED)
 
 
@@ -685,13 +745,15 @@ class AlertListView(generics.ListAPIView):
     serializer_class = AlertSerializer
 
     def get_queryset(self):
-        refresh_device_statuses()
-        return Alert.objects.order_by('-happened_at', '-id')
+        greenhouse = default_greenhouse(self.request.user)
+        refresh_device_statuses(greenhouse=greenhouse)
+        return _alert_queryset(greenhouse).order_by('-happened_at', '-id')
 
 
 class AlertMarkReadView(APIView):
     def post(self, request, pk: int):
-        alert = generics.get_object_or_404(Alert, pk=pk)
+        greenhouse = default_greenhouse(request.user)
+        alert = generics.get_object_or_404(_alert_queryset(greenhouse), pk=pk)
         alert.is_read = True
         alert.save(update_fields=['is_read', 'updated_at'])
         return Response(AlertSerializer(alert).data)
@@ -699,7 +761,8 @@ class AlertMarkReadView(APIView):
 
 class AlertMarkAllReadView(APIView):
     def post(self, request):
-        updated = Alert.objects.filter(is_read=False).update(is_read=True, updated_at=timezone.now())
+        greenhouse = default_greenhouse(request.user)
+        updated = _alert_queryset(greenhouse).filter(is_read=False).update(is_read=True, updated_at=timezone.now())
         return Response({'updated': updated})
 
 
@@ -707,13 +770,19 @@ class LiveIngestSamplesView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        _check_ingest_token(request)
+        auth_device = _check_ingest_token(request)
+        _require_controller_token(auth_device)
         serializer = LiveSampleSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
 
         run = generics.get_object_or_404(ExperimentRun, pk=data['run_id'])
-        greenhouse = run.greenhouse or default_greenhouse()
+        if auth_device is None and request.data.get('greenhouse_id') is None:
+            greenhouse = run.greenhouse or default_greenhouse()
+        else:
+            greenhouse = _ingest_greenhouse(request, auth_device)
+        if run.greenhouse_id is not None and run.greenhouse_id != greenhouse.id:
+            raise PermissionDenied('Run không thuộc greenhouse của device token')
         if run.greenhouse_id is None:
             run.greenhouse = greenhouse
             run.save(update_fields=['greenhouse', 'updated_at'])
@@ -753,14 +822,11 @@ class IngestReadingsView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        _check_ingest_token(request)
-        greenhouse_id = request.data.get('greenhouse_id')
-        greenhouse = (
-            generics.get_object_or_404(Greenhouse, pk=greenhouse_id, is_active=True)
-            if greenhouse_id is not None
-            else default_greenhouse()
-        )
-        reading = ingest_sensor_payload(request.data, device_code='esp32-main', greenhouse=greenhouse)
+        auth_device = _check_ingest_token(request)
+        _require_controller_token(auth_device)
+        greenhouse = _ingest_greenhouse(request, auth_device)
+        device_code = auth_device.code if auth_device is not None else 'esp32-main'
+        reading = ingest_sensor_payload(request.data, device_code=device_code, greenhouse=greenhouse)
         estimation = ensure_estimation_for_reading(reading, greenhouse=greenhouse)
 
         return Response({
@@ -775,29 +841,11 @@ class IngestHeartbeatView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request):
-        _check_ingest_token(request)
-
-        controller, _ = Device.objects.get_or_create(
-            code='esp32-main',
-            defaults={
-                'name': 'ESP32 Main',
-                'device_type': Device.DeviceType.CONTROLLER,
-                'status': Device.DeviceStatus.OFFLINE,
-            },
-        )
-
-        controller.status = Device.DeviceStatus.ONLINE
-        controller.last_seen_at = timezone.now()
-        firmware = request.data.get('firmware_version')
-        if firmware:
-            controller.firmware_version = firmware
-        controller.metadata = {**controller.metadata, **(request.data.get('metadata') or {})}
-
-        update_fields = ['status', 'last_seen_at', 'metadata', 'updated_at']
-        if firmware:
-            update_fields.append('firmware_version')
-
-        controller.save(update_fields=update_fields)
+        auth_device = _check_ingest_token(request)
+        _require_controller_token(auth_device)
+        greenhouse = _ingest_greenhouse(request, auth_device)
+        device_code = auth_device.code if auth_device is not None else 'esp32-main'
+        ingest_heartbeat_payload(request.data, device_code=device_code, greenhouse=greenhouse)
         return Response({'message': 'heartbeat ok'})
 
 
@@ -805,45 +853,22 @@ class IngestPendingCommandsView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def get(self, request):
-        _check_ingest_token(request)
+        auth_device = _check_ingest_token(request)
+        greenhouse = _ingest_greenhouse(request, auth_device)
+        commands = get_pending_commands(device=auth_device, greenhouse=greenhouse)
 
-        commands = (
-            DeviceCommand.objects
-            .filter(status=DeviceCommand.CommandStatus.PENDING)
-            .select_related('device')
-            .order_by('created_at', 'id')[:5]
-        )
-
-        return Response(DeviceCommandSerializer(commands, many=True).data)
+        return Response(commands)
 
 
 class IngestCommandAckView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request, pk: int):
-        _check_ingest_token(request)
-
-        cmd = generics.get_object_or_404(DeviceCommand, pk=pk)
-        cmd.status = request.data.get('status') or DeviceCommand.CommandStatus.ACK
-        cmd.acked_at = timezone.now()
-        cmd.save(update_fields=['status', 'acked_at', 'updated_at'])
-
-        state, _ = DeviceState.objects.get_or_create(device=cmd.device)
-
-        if 'actual_state' in request.data:
-            actual_state = _to_bool(request.data.get('actual_state'))
-            state.is_on = actual_state
-            state.desired_on = actual_state
-        elif cmd.value.lower() in {'on', 'off'}:
-            state.is_on = cmd.value.lower() == 'on'
-            state.desired_on = state.is_on
-
-        state.last_command = cmd.command
-        state.last_value = cmd.value
-        state.save(update_fields=['is_on', 'desired_on', 'last_command', 'last_value', 'updated_at'])
-
-        cmd.device.status = Device.DeviceStatus.ONLINE
-        cmd.device.last_seen_at = timezone.now()
-        cmd.device.save(update_fields=['status', 'last_seen_at', 'updated_at'])
+        auth_device = _check_ingest_token(request)
+        greenhouse = _ingest_greenhouse(request, auth_device)
+        payload = {**request.data, 'id': pk}
+        cmd = ack_device_command_payload(payload, device=auth_device, greenhouse=greenhouse)
+        if cmd is None:
+            raise Http404('command_not_found_or_forbidden')
 
         return Response({'message': 'ack ok'})

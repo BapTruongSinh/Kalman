@@ -1,6 +1,0 @@
-Metadata-Version: 2.4
-Name: greenhouse-kalman
-Version: 0.1.0
-Summary: Pure Adaptive Kalman algorithm package for greenhouse sensor estimation.
-Requires-Python: >=3.10
-Requires-Dist: numpy>=1.26.0
