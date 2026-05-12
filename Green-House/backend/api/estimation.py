@@ -173,6 +173,7 @@ def ensure_estimation_for_reading(
     validation = validate_live_record(raw)
     processed = preprocess_single(raw, validation)
     result = estimator.step(processed, cycle_index=cycle_index)
+    has_soil_measurement = raw.soil_moisture is not None
 
     return EstimationCycle.objects.create(
         sample_ts=result.timestamp,
@@ -193,14 +194,14 @@ def ensure_estimation_for_reading(
         raw_drip=raw.drip,
         raw_mist=raw.mist,
         raw_fan=raw.fan,
-        arx_predicted=result.arx_predicted,
-        kf_x_prior=result.x_prior,
-        kf_P_prior=result.P_prior,
-        kf_innovation=result.innovation,
-        kf_R=result.R,
-        kf_K=result.K,
-        kf_x_posterior=result.x_posterior,
-        kf_P_posterior=result.P_posterior,
+        arx_predicted=result.arx_predicted if has_soil_measurement else None,
+        kf_x_prior=result.x_prior if has_soil_measurement else None,
+        kf_P_prior=result.P_prior if has_soil_measurement else None,
+        kf_innovation=result.innovation if has_soil_measurement else None,
+        kf_R=result.R if has_soil_measurement else None,
+        kf_K=result.K if has_soil_measurement else None,
+        kf_x_posterior=result.x_posterior if has_soil_measurement else None,
+        kf_P_posterior=result.P_posterior if has_soil_measurement else None,
         latency_ms=result.latency_ms,
         error_message=result.error_message or '',
         ingest_dedupe_key=ingest_dedupe_key,

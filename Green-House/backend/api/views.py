@@ -38,6 +38,7 @@ from .serializers import (
     CycleSerializer,
     EvaluationSummarySerializer,
     GreenhouseControlProfileSerializer,
+    IngestReadingSerializer,
     LegacyAMPCRecommendationSerializer,
     LiveSampleSerializer,
     LoginSerializer,
@@ -251,6 +252,15 @@ def _require_controller_token(device: Device | None) -> None:
         raise PermissionDenied('Endpoint ingest telemetry yêu cầu controller token')
 
 
+def _query_int(request, name: str, default: int, *, min_value: int, max_value: int) -> int:
+    raw_value = request.query_params.get(name, default)
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        raise ValidationError({name: f'{name} must be an integer'})
+    return min(max(value, min_value), max_value)
+
+
 class LoginView(TokenObtainPairView):
     permission_classes = [permissions.AllowAny]
     serializer_class = LoginSerializer
@@ -299,7 +309,7 @@ class ChartView(APIView):
     def get(self, request):
         greenhouse = default_greenhouse(request.user)
         metric = request.query_params.get('metric')
-        hours = int(request.query_params.get('hours', '24'))
+        hours = _query_int(request, 'hours', 24, min_value=1, max_value=24 * 30)
 
         if metric not in {'temperature', 'humidity', 'light', 'soil_moisture'}:
             raise ValidationError('metric không hợp lệ')
@@ -324,8 +334,8 @@ class ChartView(APIView):
 class SensorHistoryView(APIView):
     def get(self, request):
         greenhouse = default_greenhouse(request.user)
-        page = max(int(request.query_params.get('page', 1)), 1)
-        page_size = min(max(int(request.query_params.get('page_size', 20)), 5), 100)
+        page = _query_int(request, 'page', 1, min_value=1, max_value=1_000_000)
+        page_size = _query_int(request, 'page_size', 20, min_value=5, max_value=100)
 
         queryset = SensorData.objects.filter(greenhouse=greenhouse).order_by('-recorded_at', '-id')
 
@@ -350,7 +360,7 @@ class SensorHistoryView(APIView):
             queryset = queryset.filter(recorded_at__lte=date_to)
 
         if hours_raw and not date_from_raw and not date_to_raw:
-            hours = max(int(hours_raw), 1)
+            hours = _query_int(request, 'hours', 24, min_value=1, max_value=24 * 30)
             since = timezone.now() - timedelta(hours=hours)
             queryset = queryset.filter(recorded_at__gte=since)
 
@@ -487,7 +497,7 @@ class RunSeriesView(APIView):
             ExperimentRun.objects.filter(greenhouse__owner=request.user),
             pk=run_id,
         )
-        limit = min(max(int(request.query_params.get('limit', '500')), 1), 5000)
+        limit = _query_int(request, 'limit', 500, min_value=1, max_value=5000)
         cycles = (
             EstimationCycle.objects
             .filter(run=run)
@@ -513,7 +523,7 @@ class KalmanTestSeriesView(APIView):
         if not settings.DEBUG and not request.user.is_staff:
             raise PermissionDenied('kalman_test_series_staff_only')
 
-        limit = min(max(int(request.query_params.get('limit', '100000')), 1), 100000)
+        limit = _query_int(request, 'limit', 100000, min_value=1, max_value=100000)
         database_name = getattr(settings, 'KALMAN_TEST_DB_NAME', 'kalman_greenhouse')
         table_name = 'pipeline_cycles'
         quoted_database = database_name.replace('`', '``')
@@ -585,7 +595,7 @@ class KalmanTestSeriesView(APIView):
 class MPCTestSeriesView(APIView):
     def get(self, request):
         greenhouse = default_greenhouse(request.user)
-        limit = min(max(int(request.query_params.get('limit', '5000')), 1), 100000)
+        limit = _query_int(request, 'limit', 5000, min_value=1, max_value=100000)
         queryset = (
             AMPCRecommendation.objects
             .filter(
@@ -824,9 +834,12 @@ class IngestReadingsView(APIView):
     def post(self, request):
         auth_device = _check_ingest_token(request)
         _require_controller_token(auth_device)
+        serializer = IngestReadingSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = {**request.data, **serializer.validated_data}
         greenhouse = _ingest_greenhouse(request, auth_device)
         device_code = auth_device.code if auth_device is not None else 'esp32-main'
-        reading = ingest_sensor_payload(request.data, device_code=device_code, greenhouse=greenhouse)
+        reading = ingest_sensor_payload(payload, device_code=device_code, greenhouse=greenhouse)
         estimation = ensure_estimation_for_reading(reading, greenhouse=greenhouse)
 
         return Response({

@@ -586,6 +586,30 @@ class LiveSampleSerializer(serializers.Serializer):
     fan = serializers.FloatField(required=False, allow_null=True)
 
 
+class IngestReadingSerializer(serializers.Serializer):
+    recorded_at = serializers.DateTimeField(required=False)
+    greenhouse_id = serializers.IntegerField(required=False)
+    soil_moisture = serializers.FloatField(required=False, allow_null=True)
+    temperature = serializers.FloatField(required=False, allow_null=True)
+    humidity = serializers.FloatField(required=False, allow_null=True)
+    light = serializers.FloatField(required=False, allow_null=True)
+    payload = serializers.DictField(required=False)
+    metadata = serializers.DictField(required=False)
+    sensor_errors = serializers.DictField(required=False)
+    device_states = serializers.DictField(required=False)
+    firmware_version = serializers.CharField(required=False, allow_blank=True)
+    auto_mode = serializers.BooleanField(required=False)
+    mode = serializers.CharField(required=False, allow_blank=True)
+    manual_reason = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, attrs):
+        for field in ("soil_moisture", "temperature", "humidity", "light"):
+            value = attrs.get(field)
+            if value is not None and not isfinite(float(value)):
+                raise serializers.ValidationError({field: f"{field} must be finite"})
+        return attrs
+
+
 class AlertSerializer(serializers.ModelSerializer):
     zone = serializers.SerializerMethodField()
     zone_name = serializers.SerializerMethodField()

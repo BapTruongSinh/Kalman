@@ -27,7 +27,7 @@ from api.models import (
 from api.ampc import run_auto_recommendation
 from api.ampc_scheduler import get_scheduler_state, run_due_once
 from api.et0 import ET0Failure, ET0Reading
-from api.estimation import ensure_estimation_for_reading
+from api.estimation import ensure_estimation_for_reading, latest_estimation
 
 
 @override_settings(INGEST_DEVICE_TOKEN='test-ingest-token')
@@ -537,6 +537,48 @@ class GreenHouseServerCutoverTests(TestCase):
         self.assertEqual(AMPCRecommendation.objects.count(), 0)
         self.assertEqual(DeviceCommand.objects.count(), 0)
 
+    def test_reading_ingest_rejects_malformed_numeric_payload(self):
+        cases = ['abc', 'Infinity']
+
+        for value in cases:
+            with self.subTest(value=value):
+                response = self.client.post(
+                    '/api/ingest/readings/',
+                    {
+                        'recorded_at': timezone.now().isoformat(),
+                        'soil_moisture': value,
+                        'temperature': 28.0,
+                        'humidity': 70.0,
+                        'light': 10000.0,
+                    },
+                    format='json',
+                    HTTP_X_DEVICE_TOKEN=settings.INGEST_DEVICE_TOKEN,
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('soil_moisture', response.json())
+        self.assertEqual(SensorData.objects.count(), 0)
+        self.assertEqual(EstimationCycle.objects.count(), 0)
+
+    def test_reading_ingest_missing_soil_does_not_create_usable_kalman_state(self):
+        response = self.client.post(
+            '/api/ingest/readings/',
+            {
+                'recorded_at': timezone.now().isoformat(),
+                'temperature': 28.0,
+                'humidity': 70.0,
+                'light': 10000.0,
+            },
+            format='json',
+            HTTP_X_DEVICE_TOKEN=settings.INGEST_DEVICE_TOKEN,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        cycle = EstimationCycle.objects.get(id=response.json()['estimation_id'])
+        self.assertIsNone(cycle.raw_soil_moisture)
+        self.assertIsNone(cycle.kf_x_posterior)
+        self.assertIsNone(latest_estimation(greenhouse=self.greenhouse))
+
     def test_ampc_error_does_not_queue_pump_command(self):
         profile = GreenhouseControlProfile.objects.get(greenhouse=self.greenhouse)
         profile.actuator_enabled = True
@@ -834,6 +876,21 @@ class GreenHouseServerCutoverTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()['recommendation'])
+
+    def test_malformed_query_params_return_400(self):
+        cases = [
+            '/api/sensor-readings/chart/?metric=soil_moisture&hours=bad',
+            '/api/sensor-readings/history/?page=bad',
+            '/api/sensor-readings/history/?hours=bad',
+            f'/api/runs/{self.run.id}/series/?limit=bad',
+            '/api/mpc-test/series/?limit=bad',
+        ]
+
+        for url in cases:
+            with self.subTest(url=url):
+                response = self.client.get(url)
+
+                self.assertEqual(response.status_code, 400)
 
     def test_mpc_test_series_filters_seed_tag_before_limit(self):
         tagged = AMPCRecommendation.objects.create(
