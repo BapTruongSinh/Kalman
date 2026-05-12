@@ -73,12 +73,30 @@ The MPC objective penalizes stress `max(0, Dr - RAW)`, overwater before clamping
 
 `AMPCRecommendation.state_snapshot.fao56` stores `initial_theta`, `initial_dr`, `taw`, `raw`, `ks`, `et0_step`, `etc_adj`, `irrigation_depth_mm`, predicted `Dr`, and predicted sensor-percent moisture. `state_snapshot.et0` stores the ET0 source or fail-closed reason.
 
+## Frontend Settings Contract
+
+`Green-House/frontend/src/app/components/AutoSettings.tsx` exposes the persisted FAO-56 profile through the legacy `/api/auto-settings/` endpoint.
+
+The form sends the backend field names directly for `crop_kc`, `soil_type`, `theta_fc`, `theta_wp`, `theta_sat`, `root_depth_m`, `depletion_fraction_p`, `pump_efficiency`, `pump_flow_lps`, `irrigation_area_m2`, `latitude`, and `longitude`.
+
+Soil presets in the frontend match the accepted backend/MPC contract:
+
+| soil_type | theta_fc | theta_wp | theta_sat |
+| --- | ---: | ---: | ---: |
+| `sand` | 0.10 | 0.04 | 0.45 |
+| `light_loam` | 0.15 | 0.06 | 0.45 |
+| `loam` | 0.32 | 0.15 | 0.45 |
+| `clay_loam` | 0.35 | 0.23 | 0.45 |
+
+Selecting a soil preset fills the theta fields on the client, but users can still edit those physical values before saving. The UI labels keep sensor-percent thresholds separate from volumetric `theta` values.
+
 ## Implementation Files
 
 - `Green-House/backend/api/estimation.py`: SensorData -> `api_estimationcycle`
 - `Green-House/backend/api/ampc.py`: greenhouse-scoped AMPC service
 - `Green-House/backend/api/views.py`: REST endpoints
 - `Green-House/backend/api/models.py`: greenhouse, config, estimation, recommendation models
+- `Green-House/frontend/src/app/components/AutoSettings.tsx`: FAO profile controls and legacy dashboard settings
 - `MPC/mpc/solver/`: grid shooting solver
 - `MPC/mpc/plant/arx.py`: ARX plant model
 - `MPC/mpc/config.py`: controller config and cost weights

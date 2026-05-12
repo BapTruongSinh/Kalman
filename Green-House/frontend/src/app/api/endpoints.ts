@@ -20,12 +20,14 @@ export const getControlState = () =>
 export const setControlMode = (mode: "AUTO" | "MANUAL", reason = "") =>
   apiClient.post<ControlState>("/control/mode/", { mode, reason });
 
+export type FaoSoilType = "sand" | "light_loam" | "loam" | "clay_loam";
+
 export interface ControlProfile {
   crop_name: string;
   crop_kc: number;
   latitude: number;
   longitude: number;
-  soil_type: string;
+  soil_type: FaoSoilType;
   theta_fc: number;
   theta_wp: number;
   theta_sat: number;
