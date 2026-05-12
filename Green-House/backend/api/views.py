@@ -31,13 +31,17 @@ from .serializers import (
     AMPCRecommendationSerializer,
     AMPCSchedulerStateSerializer,
     AlertSerializer,
+    ControlModeInputSerializer,
     ControlStateSerializer,
+    DeviceCommandAckInputSerializer,
+    DeviceCommandInputSerializer,
     DeviceCommandSerializer,
     DeviceSerializer,
     EstimationCycleSerializer,
     CycleSerializer,
     EvaluationSummarySerializer,
     GreenhouseControlProfileSerializer,
+    IngestHeartbeatSerializer,
     IngestReadingSerializer,
     LegacyAMPCRecommendationSerializer,
     LiveSampleSerializer,
@@ -392,14 +396,18 @@ class ControlStateView(APIView):
 
 class ControlModeView(APIView):
     def post(self, request):
+        serializer = ControlModeInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
         greenhouse = default_greenhouse(request.user)
-        mode = str(request.data.get('mode') or '').upper().strip()
+        mode = data['mode']
         if mode not in {'AUTO', 'MANUAL'}:
             raise ValidationError('mode phải là AUTO hoặc MANUAL')
 
         control = _get_control_state(greenhouse)
         control.mode = mode
-        control.manual_reason = str(request.data.get('reason') or '').strip()
+        control.manual_reason = data.get('reason') or ''
 
         if mode == ControlState.Mode.AUTO:
             control.manual_changed_at = None
@@ -713,11 +721,15 @@ class DeviceToggleView(APIView):
 
 class DeviceCommandView(APIView):
     def post(self, request, pk: int):
+        serializer = DeviceCommandInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
         greenhouse = default_greenhouse(request.user)
         device = generics.get_object_or_404(Device.objects.filter(greenhouse=greenhouse), pk=pk)
-        command = (request.data.get('command') or '').strip()
-        payload = request.data.get('payload') or {}
-        value = str(request.data.get('value') or '')
+        command = data['command']
+        payload = data.get('payload') or {}
+        value = data.get('value') or ''
 
         if not command:
             raise ValidationError('Thiếu command')
@@ -856,9 +868,12 @@ class IngestHeartbeatView(APIView):
     def post(self, request):
         auth_device = _check_ingest_token(request)
         _require_controller_token(auth_device)
+        serializer = IngestHeartbeatSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = {**request.data, **serializer.validated_data}
         greenhouse = _ingest_greenhouse(request, auth_device)
         device_code = auth_device.code if auth_device is not None else 'esp32-main'
-        ingest_heartbeat_payload(request.data, device_code=device_code, greenhouse=greenhouse)
+        ingest_heartbeat_payload(payload, device_code=device_code, greenhouse=greenhouse)
         return Response({'message': 'heartbeat ok'})
 
 
@@ -878,8 +893,10 @@ class IngestCommandAckView(APIView):
 
     def post(self, request, pk: int):
         auth_device = _check_ingest_token(request)
+        serializer = DeviceCommandAckInputSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
         greenhouse = _ingest_greenhouse(request, auth_device)
-        payload = {**request.data, 'id': pk}
+        payload = {**serializer.validated_data, 'id': pk}
         cmd = ack_device_command_payload(payload, device=auth_device, greenhouse=greenhouse)
         if cmd is None:
             raise Http404('command_not_found_or_forbidden')

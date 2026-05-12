@@ -95,6 +95,11 @@ SENSOR_FIELD_BOUNDS = {
     "temperature": (-99.99, 99.99),
     "light": (0.0, 99999999.99),
 }
+DEVICE_FIRMWARE_MAX_LENGTH = 50
+DEVICE_COMMAND_TEXT_MAX_LENGTH = 50
+MANUAL_REASON_MAX_LENGTH = 255
+KNOWN_SENSOR_ERROR_KEYS = frozenset({"dht", "soil", "light", "gas"})
+COMMAND_STATUS_VALUES = tuple(value for value, _label in DeviceCommand.CommandStatus.choices)
 
 
 def _current_or_default(instance, attrs, field, default):
@@ -129,6 +134,15 @@ def _validate_sensor_numeric_fields(attrs):
             raise serializers.ValidationError({
                 field: f"{field} must satisfy {min_value} <= value <= {max_value}"
             })
+
+
+def _validate_sensor_error_keys(value):
+    unknown = sorted(str(key) for key in value.keys() if str(key) not in KNOWN_SENSOR_ERROR_KEYS)
+    if unknown:
+        raise serializers.ValidationError(
+            f"sensor_errors only supports keys: {', '.join(sorted(KNOWN_SENSOR_ERROR_KEYS))}"
+        )
+    return value
 
 
 def _apply_soil_preset(attrs):
@@ -621,14 +635,81 @@ class IngestReadingSerializer(serializers.Serializer):
     metadata = serializers.DictField(required=False)
     sensor_errors = serializers.DictField(required=False)
     device_states = serializers.DictField(required=False)
-    firmware_version = serializers.CharField(required=False, allow_blank=True)
+    firmware_version = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=DEVICE_FIRMWARE_MAX_LENGTH,
+    )
     auto_mode = serializers.BooleanField(required=False)
     mode = serializers.CharField(required=False, allow_blank=True)
-    manual_reason = serializers.CharField(required=False, allow_blank=True)
+    manual_reason = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=MANUAL_REASON_MAX_LENGTH,
+    )
 
     def validate(self, attrs):
         _validate_sensor_numeric_fields(attrs)
         return attrs
+
+    def validate_sensor_errors(self, value):
+        return _validate_sensor_error_keys(value)
+
+
+class IngestHeartbeatSerializer(serializers.Serializer):
+    firmware_version = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=DEVICE_FIRMWARE_MAX_LENGTH,
+    )
+    metadata = serializers.DictField(required=False)
+    uptime_ms = serializers.IntegerField(required=False, allow_null=True)
+    free_heap = serializers.IntegerField(required=False, allow_null=True)
+    sensor_errors = serializers.DictField(required=False)
+    auto_mode = serializers.BooleanField(required=False)
+    mode = serializers.CharField(required=False, allow_blank=True)
+    manual_reason = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=MANUAL_REASON_MAX_LENGTH,
+    )
+
+    def validate_sensor_errors(self, value):
+        return _validate_sensor_error_keys(value)
+
+
+class ControlModeInputSerializer(serializers.Serializer):
+    mode = serializers.CharField(max_length=10)
+    reason = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=MANUAL_REASON_MAX_LENGTH,
+    )
+
+    def validate_mode(self, value):
+        mode = value.upper().strip()
+        if mode not in ControlState.Mode.values:
+            raise serializers.ValidationError("mode must be AUTO or MANUAL")
+        return mode
+
+
+class DeviceCommandInputSerializer(serializers.Serializer):
+    command = serializers.CharField(
+        allow_blank=False,
+        trim_whitespace=True,
+        max_length=DEVICE_COMMAND_TEXT_MAX_LENGTH,
+    )
+    value = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=DEVICE_COMMAND_TEXT_MAX_LENGTH,
+    )
+    payload = serializers.DictField(required=False)
+
+
+class DeviceCommandAckInputSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=COMMAND_STATUS_VALUES, required=False)
+    actual_state = serializers.BooleanField(required=False, allow_null=True)
 
 
 class AlertSerializer(serializers.ModelSerializer):

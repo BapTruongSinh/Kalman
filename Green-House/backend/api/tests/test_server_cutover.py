@@ -18,6 +18,7 @@ from api.models import (
     ControlState,
     Device,
     DeviceCommand,
+    DeviceState,
     EstimationCycle,
     ExperimentRun,
     Greenhouse,
@@ -627,6 +628,130 @@ class GreenHouseServerCutoverTests(TestCase):
 
         self.assertEqual(SensorData.objects.count(), 0)
         self.assertEqual(EstimationCycle.objects.count(), 0)
+
+    def test_ingest_heartbeat_rejects_oversized_text_payload(self):
+        cases = [
+            ({'firmware_version': 'v' * 51}, 'firmware_version'),
+            ({'mode': 'MANUAL', 'manual_reason': 'r' * 256}, 'manual_reason'),
+        ]
+
+        for payload, field in cases:
+            with self.subTest(field=field):
+                response = self.client.post(
+                    '/api/ingest/heartbeat/',
+                    payload,
+                    format='json',
+                    HTTP_X_DEVICE_TOKEN=settings.INGEST_DEVICE_TOKEN,
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.json())
+
+        self.assertEqual(Device.objects.count(), 0)
+        self.assertEqual(ControlState.objects.count(), 0)
+
+    def test_reading_ingest_rejects_oversized_text_and_unknown_sensor_errors(self):
+        cases = [
+            ({'firmware_version': 'v' * 51}, 'firmware_version'),
+            ({'mode': 'MANUAL', 'manual_reason': 'r' * 256}, 'manual_reason'),
+            ({'sensor_errors': {'sensor-name-that-is-not-allowed': True}}, 'sensor_errors'),
+        ]
+
+        for override, field in cases:
+            with self.subTest(field=field):
+                payload = {
+                    'recorded_at': timezone.now().isoformat(),
+                    'soil_moisture': 60.0,
+                    'temperature': 28.0,
+                    'humidity': 70.0,
+                    'light': 10000.0,
+                    **override,
+                }
+                response = self.client.post(
+                    '/api/ingest/readings/',
+                    payload,
+                    format='json',
+                    HTTP_X_DEVICE_TOKEN=settings.INGEST_DEVICE_TOKEN,
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.json())
+
+        self.assertEqual(SensorData.objects.count(), 0)
+        self.assertEqual(EstimationCycle.objects.count(), 0)
+        self.assertEqual(Alert.objects.count(), 0)
+        self.assertEqual(ControlState.objects.count(), 0)
+
+    def test_control_mode_rejects_oversized_reason(self):
+        response = self.client.post(
+            '/api/control/mode/',
+            {'mode': 'MANUAL', 'reason': 'r' * 256},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('reason', response.json())
+        self.assertEqual(ControlState.objects.count(), 0)
+
+    def test_device_command_rejects_oversized_command_payload(self):
+        pump = Device.objects.create(
+            greenhouse=self.greenhouse,
+            name='Pump',
+            code='pump-main',
+            device_type=Device.DeviceType.PUMP,
+        )
+        cases = [
+            ({'command': 'c' * 51, 'value': 'on'}, 'command'),
+            ({'command': 'set_power', 'value': 'v' * 51}, 'value'),
+        ]
+
+        for payload, field in cases:
+            with self.subTest(field=field):
+                response = self.client.post(
+                    f'/api/devices/{pump.id}/command/',
+                    payload,
+                    format='json',
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.json())
+
+        self.assertEqual(DeviceCommand.objects.count(), 0)
+        self.assertEqual(DeviceState.objects.count(), 0)
+        self.assertEqual(ControlState.objects.count(), 0)
+
+    def test_ingest_command_ack_rejects_invalid_status_payload(self):
+        controller = Device.objects.create(
+            greenhouse=self.greenhouse,
+            name='ESP32 Main',
+            code='esp32-main',
+            device_type=Device.DeviceType.CONTROLLER,
+            api_token='controller-token',
+        )
+        pump = Device.objects.create(
+            greenhouse=self.greenhouse,
+            name='Pump',
+            code='pump-main',
+            device_type=Device.DeviceType.PUMP,
+        )
+        cmd = DeviceCommand.objects.create(device=pump, command='set_power', value='on')
+        cases = ['s' * 21, 'done']
+
+        for status_value in cases:
+            with self.subTest(status=status_value):
+                response = self.client.post(
+                    f'/api/ingest/commands/{cmd.id}/ack/',
+                    {'status': status_value},
+                    format='json',
+                    HTTP_X_DEVICE_TOKEN=controller.api_token,
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('status', response.json())
+
+        cmd.refresh_from_db()
+        self.assertEqual(cmd.status, DeviceCommand.CommandStatus.PENDING)
+        self.assertIsNone(cmd.acked_at)
 
     def test_reading_ingest_missing_soil_does_not_create_usable_kalman_state(self):
         response = self.client.post(

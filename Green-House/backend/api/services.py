@@ -6,13 +6,44 @@ from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
+from rest_framework.exceptions import ValidationError
 
 from .models import Alert, ControlState, Device, DeviceCommand, DeviceState, Greenhouse, SensorData
-from .serializers import DeviceCommandSerializer
+from .serializers import (
+    COMMAND_STATUS_VALUES,
+    DEVICE_COMMAND_TEXT_MAX_LENGTH,
+    DEVICE_FIRMWARE_MAX_LENGTH,
+    KNOWN_SENSOR_ERROR_KEYS,
+    MANUAL_REASON_MAX_LENGTH,
+    DeviceCommandSerializer,
+)
 
 
 HEARTBEAT_TIMEOUT_SECONDS = 15
 HEARTBEAT_SLOW_SECONDS = 30
+
+
+def _clean_limited_text(field: str, value, max_length: int) -> str:
+    if value is None:
+        return ''
+    text = str(value).strip()
+    if len(text) > max_length:
+        raise ValidationError({field: f'{field} must be at most {max_length} characters'})
+    return text
+
+
+def _clean_sensor_errors(value) -> dict:
+    if value in (None, ''):
+        return {}
+    if not isinstance(value, dict):
+        raise ValidationError({'sensor_errors': 'sensor_errors must be an object'})
+
+    unknown = sorted(str(key) for key in value.keys() if str(key) not in KNOWN_SENSOR_ERROR_KEYS)
+    if unknown:
+        raise ValidationError({
+            'sensor_errors': f"sensor_errors only supports keys: {', '.join(sorted(KNOWN_SENSOR_ERROR_KEYS))}"
+        })
+    return value
 
 
 def get_controller(device_code: str = 'esp32-main', *, greenhouse: Greenhouse | None = None) -> Device:
@@ -54,6 +85,11 @@ def sync_device_online(device: Device, firmware_version: str | None = None, meta
 
     update_fields = ['status', 'last_seen_at', 'updated_at']
 
+    firmware_version = _clean_limited_text(
+        'firmware_version',
+        firmware_version,
+        DEVICE_FIRMWARE_MAX_LENGTH,
+    )
     if firmware_version:
         device.firmware_version = firmware_version
         update_fields.append('firmware_version')
@@ -212,6 +248,7 @@ def notify_pending_commands(device_code: str = 'esp32-main', *, greenhouse: Gree
 
 
 def _force_manual_mode(reason: str, *, greenhouse: Greenhouse | None = None):
+    reason = _clean_limited_text('manual_reason', reason, MANUAL_REASON_MAX_LENGTH)
     if greenhouse is None:
         control, _ = ControlState.objects.get_or_create(singleton_key='main')
     else:
@@ -239,8 +276,8 @@ def sync_control_mode_from_payload(payload: dict, *, greenhouse: Greenhouse | No
             defaults={'singleton_key': ControlState.singleton_key_for_greenhouse(greenhouse.id)},
         )
 
-    sensor_errors = payload.get('sensor_errors') or {}
-    if isinstance(sensor_errors, dict) and bool(sensor_errors.get('dht', False)):
+    sensor_errors = _clean_sensor_errors(payload.get('sensor_errors'))
+    if bool(sensor_errors.get('dht', False)):
         return _force_manual_mode('dht_sensor_error', greenhouse=greenhouse)
 
     mode = payload.get('mode')
@@ -267,7 +304,11 @@ def sync_control_mode_from_payload(payload: dict, *, greenhouse: Greenhouse | No
             control.manual_changed_at = None
             control.save(update_fields=['mode', 'manual_reason', 'manual_changed_at', 'updated_at'])
         else:
-            control.manual_reason = payload.get('manual_reason') or 'esp_button_mode'
+            control.manual_reason = _clean_limited_text(
+                'manual_reason',
+                payload.get('manual_reason') or 'esp_button_mode',
+                MANUAL_REASON_MAX_LENGTH,
+            )
             control.manual_changed_at = timezone.now()
             control.save(update_fields=['mode', 'manual_reason', 'manual_changed_at', 'updated_at'])
 
@@ -279,10 +320,7 @@ def sync_sensor_alerts(payload: dict, device_code: str = 'esp32-main', *, greenh
     metadata = controller.metadata or {}
 
     previous_errors = metadata.get('sensor_errors') or {}
-    current_errors = payload.get('sensor_errors') or {}
-
-    if not isinstance(current_errors, dict):
-        return
+    current_errors = _clean_sensor_errors(payload.get('sensor_errors'))
 
     sensor_titles = {
         'dht': 'Cảm biến DHT lỗi',
@@ -396,6 +434,8 @@ def ingest_heartbeat_payload(payload: dict, device_code: str = 'esp32-main', *, 
 
 
 def enqueue_device_command(device: Device, command: str, value: str = '', payload: dict | None = None):
+    command = _clean_limited_text('command', command, DEVICE_COMMAND_TEXT_MAX_LENGTH)
+    value = _clean_limited_text('value', value, DEVICE_COMMAND_TEXT_MAX_LENGTH)
     cmd = DeviceCommand.objects.create(
         device=device,
         command=command,
@@ -426,7 +466,11 @@ def ack_device_command_payload(
     except DeviceCommand.DoesNotExist:
         return None
 
-    cmd.status = payload.get('status') or DeviceCommand.CommandStatus.ACK
+    next_status = payload.get('status') or DeviceCommand.CommandStatus.ACK
+    if next_status not in COMMAND_STATUS_VALUES:
+        raise ValidationError({'status': f"status must be one of: {', '.join(COMMAND_STATUS_VALUES)}"})
+
+    cmd.status = next_status
     cmd.acked_at = timezone.now()
     cmd.save(update_fields=['status', 'acked_at', 'updated_at'])
 
