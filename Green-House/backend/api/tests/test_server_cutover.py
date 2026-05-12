@@ -508,6 +508,30 @@ class GreenHouseServerCutoverTests(TestCase):
         self.assertEqual(audit.state_snapshot['fail_closed'], True)
         self.assertIn('root_depth_m must be > 0', audit.state_snapshot['config_error'])
 
+    def test_fao_ampc_long_model_error_persists_fail_closed_audit(self):
+        self._seed_estimation_history(0.0)
+        reason_max_length = AMPCRecommendation._meta.get_field('reason').max_length
+        status_max_length = AMPCRecommendation._meta.get_field('safety_status').max_length
+
+        with (
+            patch('api.ampc.get_hourly_et0', return_value=self._et0_reading()),
+            patch('api.ampc.ARXPlantModel.load_artifact', side_effect=RuntimeError('x' * 300)),
+        ):
+            audit = run_auto_recommendation(
+                create_command_if_auto=False,
+                user=self.user,
+                greenhouse_id=self.greenhouse.id,
+            )
+
+        self.assertEqual(audit.safety_status, 'model_error')
+        self.assertLessEqual(len(audit.safety_status), status_max_length)
+        self.assertEqual(audit.pump_seconds, 0.0)
+        self.assertFalse(audit.command_created)
+        self.assertEqual(audit.actuator_status, AMPCRecommendation.ActuatorStatus.DISABLED)
+        self.assertEqual(len(audit.reason), reason_max_length)
+        self.assertEqual(audit.reason, 'x' * reason_max_length)
+        self.assertEqual(DeviceCommand.objects.count(), 0)
+
     def test_reading_ingest_does_not_run_ampc_even_when_auto(self):
         ControlState.objects.update_or_create(
             singleton_key='main',

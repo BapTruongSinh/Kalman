@@ -366,6 +366,14 @@ def _fail_recommendation(config: ControllerConfig, safety_status: str, reason: s
     )
 
 
+def _bounded_ampc_recommendation_text(field_name: str, value) -> str:
+    text = '' if value is None else str(value)
+    max_length = AMPCRecommendation._meta.get_field(field_name).max_length
+    if max_length is not None:
+        return text[:max_length]
+    return text
+
+
 def _invalid_config_audit(
     *,
     profile: ControlProfile | GreenhouseControlProfile,
@@ -415,6 +423,8 @@ def _persist_recommendation(
     et0_result: ET0Reading | ET0Failure | None = None,
 ) -> AMPCRecommendation:
     control = _latest_control_state(greenhouse)
+    safety_status = _bounded_ampc_recommendation_text('safety_status', recommendation.safety_status)
+    reason = _bounded_ampc_recommendation_text('reason', recommendation.reason)
     return AMPCRecommendation.objects.create(
         sensor_data=sensor_data,
         greenhouse=greenhouse,
@@ -426,8 +436,8 @@ def _persist_recommendation(
         predicted_soil_moisture=list(recommendation.predicted_soil_moisture),
         target_band=dict(recommendation.target_band),
         objective_cost=float(recommendation.cost),
-        safety_status=recommendation.safety_status,
-        reason=recommendation.reason,
+        safety_status=safety_status,
+        reason=reason,
         bias_correction=float(bias.current_bias),
         bias_window_count=len(bias.residuals),
         used_today_pump_seconds=used_today,
