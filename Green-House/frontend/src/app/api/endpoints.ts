@@ -23,6 +23,17 @@ export const setControlMode = (mode: "AUTO" | "MANUAL", reason = "") =>
 export interface ControlProfile {
   crop_name: string;
   crop_kc: number;
+  latitude: number;
+  longitude: number;
+  soil_type: string;
+  theta_fc: number;
+  theta_wp: number;
+  theta_sat: number;
+  root_depth_m: number;
+  depletion_fraction_p: number;
+  pump_efficiency: number;
+  pump_flow_lps: number;
+  irrigation_area_m2: number;
   target_low: number;
   target_high: number;
   step_seconds: number;

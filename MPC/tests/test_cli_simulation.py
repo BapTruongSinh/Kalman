@@ -140,6 +140,17 @@ def test_cli_recommend_writes_recommendation_json(tmp_path: Path) -> None:
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["safety_status"] == "safe"
     assert payload["pump_seconds"] >= 0.0
+    assert set(payload["fao56"]) >= {
+        "initial_theta",
+        "initial_dr",
+        "taw",
+        "raw",
+        "ks",
+        "et0_step",
+        "etc_adj",
+        "irrigation_depth_mm",
+        "predicted_dr",
+    }
     assert "recommendation" not in payload
     assert "config" not in payload
 

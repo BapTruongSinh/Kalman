@@ -25,9 +25,10 @@ class Recommendation:
     cost: float
     safety_status: SafetyStatus
     reason: str
+    fao56: dict[str, object] | None = None
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload: dict[str, object] = {
             "pump_seconds": self.pump_seconds,
             "step_seconds": self.step_seconds,
             "predicted_soil_moisture": list(self.predicted_soil_moisture),
@@ -36,3 +37,6 @@ class Recommendation:
             "safety_status": self.safety_status,
             "reason": self.reason,
         }
+        if self.fao56 is not None:
+            payload["fao56"] = dict(self.fao56)
+        return payload

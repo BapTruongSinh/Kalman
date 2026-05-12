@@ -9,7 +9,7 @@ from typing import Sequence
 
 from mpc.config import ControllerConfig
 from mpc.plant import PlantModel
-from mpc.solver.cost import TrajectoryCost, score_trajectory
+from mpc.solver.cost import Fao56Trajectory, TrajectoryCost, score_fao56_trajectory
 from mpc.state import ControllerState, DisturbanceForecast, PlantRecord
 from mpc.types import Recommendation, SafetyStatus
 
@@ -20,6 +20,7 @@ class CandidateResult:
     pump_sequence: tuple[float, ...]
     predictions: tuple[float, ...]
     cost: TrajectoryCost
+    fao56: Fao56Trajectory
 
 
 class GridShootingSolver:
@@ -81,6 +82,7 @@ class GridShootingSolver:
             return self._fail_closed("solver_error", str(exc))
         except Exception as exc:  # noqa: BLE001
             return self._fail_closed("model_error", str(exc))
+        fao56_details = _fao56_details(best.fao56)
         return Recommendation(
             pump_seconds=self.config.pump.clamp(best.first_pump_seconds),
             step_seconds=self.config.step_seconds,
@@ -91,7 +93,8 @@ class GridShootingSolver:
             },
             cost=best.cost.total,
             safety_status="safe",
-            reason=self._reason_for(state.soil_moisture),
+            reason=self._reason_for(best.fao56),
+            fao56=fao56_details,
         )
 
     def _solve(
@@ -153,14 +156,18 @@ class GridShootingSolver:
         disturbances: DisturbanceForecast,
         used_today_pump_seconds: float,
     ) -> CandidateResult:
-        predictions = plant_model.forecast(
+        model_predictions = plant_model.forecast(
             history,
             pump_seconds=sequence,
             step_seconds=self.config.step_seconds,
             disturbances=disturbances,
         )
-        cost = score_trajectory(
-            predictions=predictions,
+        for prediction in model_predictions:
+            if not isfinite(prediction):
+                raise ValueError("predicted soil moisture must be finite")
+
+        fao56 = score_fao56_trajectory(
+            initial_sensor_percent=state.soil_moisture,
             pump_seconds=sequence,
             previous_pump_seconds=state.last_pump_seconds,
             used_today_pump_seconds=used_today_pump_seconds,
@@ -169,8 +176,9 @@ class GridShootingSolver:
         return CandidateResult(
             first_pump_seconds=sequence[0],
             pump_sequence=sequence,
-            predictions=predictions,
-            cost=cost,
+            predictions=fao56.predicted_soil_moisture,
+            cost=fao56.cost,
+            fao56=fao56,
         )
 
     def _validate_state(
@@ -199,12 +207,12 @@ class GridShootingSolver:
         if age_seconds > self.config.safety.stale_after_seconds:
             raise ValueError("stale_sample")
 
-    def _reason_for(self, soil_moisture: float) -> str:
-        if soil_moisture < self.config.target_band.low:
-            return "below_target_margin"
-        if soil_moisture > self.config.target_band.high:
-            return "above_target_margin"
-        return "in_target_band"
+    def _reason_for(self, fao56: Fao56Trajectory) -> str:
+        if fao56.initial_depletion_mm > fao56.raw_mm:
+            return "above_raw_stress"
+        if fao56.initial_depletion_mm <= 0.0:
+            return "field_capacity_or_wetter"
+        return "within_raw"
 
     def _fail_closed(
         self,
@@ -260,3 +268,17 @@ def _history_with_state_latest(
 ) -> tuple[PlantRecord, ...]:
     state_record = state.to_plant_record(drip=history[-1].drip)
     return tuple(history[:-1]) + (state_record,)
+
+
+def _fao56_details(fao56: Fao56Trajectory) -> dict[str, object]:
+    return {
+        "initial_theta": fao56.initial_theta,
+        "initial_dr": fao56.initial_depletion_mm,
+        "taw": fao56.taw_mm,
+        "raw": fao56.raw_mm,
+        "ks": fao56.initial_water_stress_ks,
+        "et0_step": fao56.et0_step_mm,
+        "etc_adj": fao56.etc_adjusted_mm[0],
+        "irrigation_depth_mm": fao56.irrigation_depth_mm[0],
+        "predicted_dr": list(fao56.predicted_depletion_mm),
+    }

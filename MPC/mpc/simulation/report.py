@@ -67,6 +67,7 @@ class SimulationReport:
 def cost_breakdown(cost: TrajectoryCost) -> dict[str, float]:
     return {
         "band": cost.band,
+        "overwater": cost.overwater,
         "terminal": cost.terminal,
         "water": cost.water,
         "switching": cost.switching,
@@ -90,6 +91,19 @@ def config_summary(config: ControllerConfig) -> dict[str, object]:
             "min_seconds": config.pump.min_seconds,
             "max_seconds": config.pump.max_seconds,
             "grid_seconds": config.pump.grid_seconds,
+        },
+        "fao56": {
+            "crop_kc": config.fao56.crop_kc,
+            "soil_type": config.fao56.soil_type,
+            "theta_fc": config.fao56.theta_fc,
+            "theta_wp": config.fao56.theta_wp,
+            "theta_sat": config.fao56.theta_sat,
+            "root_depth_m": config.fao56.root_depth_m,
+            "depletion_fraction_p": config.fao56.depletion_fraction_p,
+            "et0_hour_mm": config.fao56.et0_hour_mm,
+            "pump_efficiency": config.fao56.pump_efficiency,
+            "pump_flow_lps": config.fao56.pump_flow_lps,
+            "irrigation_area_m2": config.fao56.irrigation_area_m2,
         },
         "adaptive": {
             "enabled": config.adaptive.enabled,

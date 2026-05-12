@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from math import isfinite
+
 from django.conf import settings
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -16,10 +18,103 @@ from .models import (
     EstimationCycle,
     EvaluationSummary,
     ExperimentRun,
+    FAO56_SOIL_PRESETS,
     Greenhouse,
     GreenhouseControlProfile,
     SensorData,
 )
+
+FAO56_THETA_FIELDS = ("theta_fc", "theta_wp", "theta_sat")
+FAO56_PHYSICAL_FIELDS = [
+    "latitude",
+    "longitude",
+    "soil_type",
+    "theta_fc",
+    "theta_wp",
+    "theta_sat",
+    "root_depth_m",
+    "depletion_fraction_p",
+    "pump_efficiency",
+    "pump_flow_lps",
+    "irrigation_area_m2",
+]
+FAO56_NUMERIC_DEFAULTS = {
+    "latitude": 16.0471,
+    "longitude": 108.2068,
+    "theta_fc": 0.32,
+    "theta_wp": 0.15,
+    "theta_sat": 0.45,
+    "root_depth_m": 0.30,
+    "depletion_fraction_p": 0.5,
+    "pump_efficiency": 0.8,
+    "pump_flow_lps": 0.02,
+    "irrigation_area_m2": 0.25,
+}
+
+
+def _current_or_default(instance, attrs, field, default):
+    if field in attrs:
+        return attrs[field]
+    return getattr(instance, field, default)
+
+
+def _finite_fao_value(instance, attrs, field):
+    value = float(_current_or_default(instance, attrs, field, FAO56_NUMERIC_DEFAULTS[field]))
+    if not isfinite(value):
+        raise serializers.ValidationError({field: f"{field} must be finite"})
+    return value
+
+
+def _apply_soil_preset(attrs):
+    if "soil_type" not in attrs:
+        return attrs
+
+    soil_type = str(attrs["soil_type"]).strip().lower()
+    if soil_type not in FAO56_SOIL_PRESETS:
+        allowed = ", ".join(sorted(FAO56_SOIL_PRESETS))
+        raise serializers.ValidationError({"soil_type": f"soil_type must be one of: {allowed}"})
+
+    explicit_theta = {field: attrs[field] for field in FAO56_THETA_FIELDS if field in attrs}
+    attrs["soil_type"] = soil_type
+    attrs.update(FAO56_SOIL_PRESETS[soil_type])
+    attrs.update(explicit_theta)
+    return attrs
+
+
+def _validate_fao56_physical_config(instance, attrs):
+    latitude = _finite_fao_value(instance, attrs, "latitude")
+    longitude = _finite_fao_value(instance, attrs, "longitude")
+    theta_fc = _finite_fao_value(instance, attrs, "theta_fc")
+    theta_wp = _finite_fao_value(instance, attrs, "theta_wp")
+    theta_sat = _finite_fao_value(instance, attrs, "theta_sat")
+    root_depth_m = _finite_fao_value(instance, attrs, "root_depth_m")
+    depletion_fraction_p = _finite_fao_value(instance, attrs, "depletion_fraction_p")
+    pump_efficiency = _finite_fao_value(instance, attrs, "pump_efficiency")
+    pump_flow_lps = _finite_fao_value(instance, attrs, "pump_flow_lps")
+    irrigation_area_m2 = _finite_fao_value(instance, attrs, "irrigation_area_m2")
+    soil_type = str(_current_or_default(instance, attrs, "soil_type", "loam")).strip().lower()
+
+    if soil_type not in FAO56_SOIL_PRESETS:
+        allowed = ", ".join(sorted(FAO56_SOIL_PRESETS))
+        raise serializers.ValidationError({"soil_type": f"soil_type must be one of: {allowed}"})
+    if not (-90.0 <= latitude <= 90.0):
+        raise serializers.ValidationError({"latitude": "latitude must satisfy -90 <= value <= 90"})
+    if not (-180.0 <= longitude <= 180.0):
+        raise serializers.ValidationError({"longitude": "longitude must satisfy -180 <= value <= 180"})
+    if not (0.0 <= theta_wp < theta_fc < theta_sat <= 0.8):
+        raise serializers.ValidationError({
+            "theta_fc": "theta values must satisfy 0 <= theta_wp < theta_fc < theta_sat <= 0.8"
+        })
+    if root_depth_m <= 0:
+        raise serializers.ValidationError({"root_depth_m": "root_depth_m must be > 0"})
+    if not (0.0 < depletion_fraction_p < 1.0):
+        raise serializers.ValidationError({"depletion_fraction_p": "depletion_fraction_p must satisfy 0 < p < 1"})
+    if not (0.0 < pump_efficiency <= 1.0):
+        raise serializers.ValidationError({"pump_efficiency": "pump_efficiency must satisfy 0 < value <= 1"})
+    if pump_flow_lps <= 0:
+        raise serializers.ValidationError({"pump_flow_lps": "pump_flow_lps must be > 0"})
+    if irrigation_area_m2 <= 0:
+        raise serializers.ValidationError({"irrigation_area_m2": "irrigation_area_m2 must be > 0"})
 
 
 class LoginSerializer(TokenObtainPairSerializer):
@@ -267,6 +362,7 @@ class GreenhouseControlProfileSerializer(serializers.ModelSerializer):
             "greenhouse_id",
             "crop_name",
             "crop_kc",
+            *FAO56_PHYSICAL_FIELDS,
             "target_low",
             "target_high",
             "pump_max_seconds",
@@ -293,6 +389,7 @@ class GreenhouseControlProfileSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "greenhouse_id", "created_at", "updated_at"]
 
     def validate(self, attrs):
+        attrs = _apply_soil_preset(attrs)
         target_low = attrs.get("target_low", getattr(self.instance, "target_low", 55.0))
         target_high = attrs.get("target_high", getattr(self.instance, "target_high", 65.0))
         pump_min = attrs.get("pump_min_seconds", getattr(self.instance, "pump_min_seconds", 0.0))
@@ -304,6 +401,7 @@ class GreenhouseControlProfileSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("pump_max_seconds must be greater than pump_min_seconds")
         if pump_grid <= 0 or pump_grid > pump_max:
             raise serializers.ValidationError("pump_grid_seconds must be > 0 and <= pump_max_seconds")
+        _validate_fao56_physical_config(self.instance, attrs)
         return attrs
 
 
@@ -360,6 +458,7 @@ class LegacyAMPCRecommendationSerializer(serializers.ModelSerializer):
             "bias_window_count",
             "used_today_pump_seconds",
             "actuator",
+            "state_snapshot",
             "created_at",
         ]
 

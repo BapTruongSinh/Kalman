@@ -42,7 +42,8 @@ python -m mpc recommend --beam-width 4
 
 Expected output file:
 
-- Có top-level `pump_seconds`, `step_seconds`, `predicted_soil_moisture`, `target_band`, `cost`, `safety_status`, `reason`.
+- Có top-level `pump_seconds`, `step_seconds`, `predicted_soil_moisture`, `target_band`, `cost`, `safety_status`, `reason`, `fao56`.
+- `fao56` có `initial_theta`, `initial_dr`, `taw`, `raw`, `ks`, `et0_step`, `etc_adj`, `irrigation_depth_mm`, và `predicted_dr`.
 - Không wrap trong `recommendation`.
 - Không có `config` envelope.
 
@@ -58,6 +59,7 @@ Expected output file:
 - Có `controllers.threshold`.
 - Có `baseline_definition.name="threshold_low_full_pump"`.
 - Có metric `band_violation_steps`, `band_violation_seconds`, `total_pump_seconds`, `switching_count`, `objective_cost`, `cost_breakdown`, `mean_absolute_observation_error`, `max_absolute_observation_error`.
+- `objective_cost` và `cost_breakdown` dùng FAO-56 `Dr/RAW` stress, overwater, water, switching, daily-cap, và terminal-stress objective. `band_violation_*` chỉ còn là metric sensor-percent legacy để so sánh dashboard.
 
 ### V3 Adaptive Simulation
 
@@ -125,5 +127,6 @@ Simulation regression dùng fixture synthetic ổn định, không dùng product
 - Synthetic bias mismatch phải chứng minh `ampc.mean_absolute_observation_error < mpc.mean_absolute_observation_error`.
 - Objective cost không cộng soft daily cap xuyên qua nhiều ngày lịch.
 - Objective cost normalize water/switching bằng `pump.max_seconds`, không dùng `step_seconds`.
+- Solver objective dùng FAO-56 `Dr/TAW/RAW`; `predicted_soil_moisture` chỉ là compatibility output theo sensor percent.
 - Soft daily cap penalty dùng tổng planned excess chia cho `soft_daily_pump_cap_seconds`.
 - Public report metric không đổi tên khi chưa cập nhật `API.md` và tests tương ứng.

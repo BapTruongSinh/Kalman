@@ -6,6 +6,7 @@ from dataclasses import asdict
 from typing import Any
 
 from mpc.config import ControllerConfig
+from mpc.fao56 import FAO56_SOIL_PRESETS
 
 DEFAULT_RUNTIME_PATHS: dict[str, str | None] = {
     "artifact": "../ARX/arx_model.json",
@@ -67,8 +68,49 @@ def default_config_schema() -> dict[str, Any]:
                 _field(
                     "crop.kc",
                     "number",
-                    "Crop coefficient for future website/ET logic; MPC runtime does not use it yet.",
+                    "Legacy crop coefficient alias; use fao56.crop_kc for runtime FAO-56.",
                     runtime_field=False,
+                ),
+                _field(
+                    "fao56.crop_kc",
+                    "number",
+                    "Crop coefficient used by FAO-56 ETc adjustment.",
+                ),
+                _field(
+                    "fao56.soil_type",
+                    "enum",
+                    "Soil preset name for FAO-56 theta defaults.",
+                    options=tuple(sorted(FAO56_SOIL_PRESETS)),
+                ),
+                _field(
+                    "fao56.root_depth_m",
+                    "number",
+                    "Effective crop root depth in meters.",
+                ),
+                _field(
+                    "fao56.depletion_fraction_p",
+                    "number",
+                    "Fraction of total available water that is readily available.",
+                ),
+                _field(
+                    "fao56.et0_hour_mm",
+                    "number",
+                    "Default hourly FAO ET0 in millimeters for CLI/demo runs.",
+                ),
+                _field(
+                    "fao56.pump_efficiency",
+                    "number",
+                    "Pump efficiency multiplier for delivered irrigation depth.",
+                ),
+                _field(
+                    "fao56.pump_flow_lps",
+                    "number",
+                    "Pump flow rate in liters per second.",
+                ),
+                _field(
+                    "fao56.irrigation_area_m2",
+                    "number",
+                    "Irrigated surface area in square meters.",
                 ),
                 _field(
                     "actuator.enabled",
@@ -155,6 +197,21 @@ def default_config_schema() -> dict[str, Any]:
                     "Number of residuals used for moving-average bias.",
                 ),
                 _field(
+                    "fao56.theta_fc",
+                    "number",
+                    "Volumetric water content at field capacity.",
+                ),
+                _field(
+                    "fao56.theta_wp",
+                    "number",
+                    "Volumetric water content at wilting point.",
+                ),
+                _field(
+                    "fao56.theta_sat",
+                    "number",
+                    "Wet-end sensor mapping, default 0.45 in the first version.",
+                ),
+                _field(
                     "adaptive.max_abs_bias",
                     "number",
                     "Absolute bound for bias correction.",
@@ -176,11 +233,15 @@ def _field(
     *,
     runtime_field: bool = True,
     secret: bool = False,
+    options: tuple[str, ...] | None = None,
 ) -> dict[str, Any]:
-    return {
+    field = {
         "name": name,
         "type": value_type,
         "description": description,
         "runtime_field": runtime_field,
         "secret": secret,
     }
+    if options is not None:
+        field["options"] = list(options)
+    return field

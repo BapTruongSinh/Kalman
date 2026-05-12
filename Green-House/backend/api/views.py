@@ -90,6 +90,17 @@ def _legacy_auto_settings_payload(profile):
     return {
         'crop_name': profile.crop_name,
         'crop_kc': profile.crop_kc,
+        'latitude': profile.latitude,
+        'longitude': profile.longitude,
+        'soil_type': profile.soil_type,
+        'theta_fc': profile.theta_fc,
+        'theta_wp': profile.theta_wp,
+        'theta_sat': profile.theta_sat,
+        'root_depth_m': profile.root_depth_m,
+        'depletion_fraction_p': profile.depletion_fraction_p,
+        'pump_efficiency': profile.pump_efficiency,
+        'pump_flow_lps': profile.pump_flow_lps,
+        'irrigation_area_m2': profile.irrigation_area_m2,
         'target_low': profile.target_low,
         'target_high': profile.target_high,
         'step_seconds': profile.step_seconds,
@@ -124,6 +135,17 @@ def _legacy_auto_settings_patch(data) -> dict:
     allowed = {
         'crop_name',
         'crop_kc',
+        'latitude',
+        'longitude',
+        'soil_type',
+        'theta_fc',
+        'theta_wp',
+        'theta_sat',
+        'root_depth_m',
+        'depletion_fraction_p',
+        'pump_efficiency',
+        'pump_flow_lps',
+        'irrigation_area_m2',
         'target_low',
         'target_high',
         'step_seconds',
@@ -431,6 +453,9 @@ class RunMetricsView(APIView):
 
 class KalmanTestSeriesView(APIView):
     def get(self, request):
+        if not settings.DEBUG and not request.user.is_staff:
+            raise PermissionDenied('kalman_test_series_staff_only')
+
         limit = min(max(int(request.query_params.get('limit', '100000')), 1), 100000)
         database_name = getattr(settings, 'KALMAN_TEST_DB_NAME', 'kalman_greenhouse')
         table_name = 'pipeline_cycles'
@@ -503,18 +528,18 @@ class KalmanTestSeriesView(APIView):
 class MPCTestSeriesView(APIView):
     def get(self, request):
         greenhouse = default_greenhouse(request.user)
-        tagged_rows = []
+        limit = min(max(int(request.query_params.get('limit', '5000')), 1), 100000)
         queryset = (
             AMPCRecommendation.objects
-            .filter(greenhouse=greenhouse)
+            .filter(
+                greenhouse=greenhouse,
+                config_snapshot__mpc_test_source='manual_mpc_test_seed',
+            )
             .select_related('sensor_data')
-            .order_by('-created_at', '-id')[:500]
+            .order_by('created_at', 'id')[:limit]
         )
-        for audit in queryset:
-            if audit.config_snapshot.get('mpc_test_source') == 'manual_mpc_test_seed':
-                tagged_rows.append(audit)
 
-        rows = list(reversed(tagged_rows))
+        rows = list(queryset)
         points = []
         for audit in rows:
             state = audit.state_snapshot or {}
