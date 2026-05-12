@@ -347,6 +347,14 @@ class ControlState(TimeStampedModel):
         verbose_name = 'Control state'
         verbose_name_plural = 'Control state'
 
+    @classmethod
+    def singleton_key_for_greenhouse(cls, greenhouse_id: int) -> str:
+        max_length = cls._meta.get_field('singleton_key').max_length
+        legacy_key = f'greenhouse:{greenhouse_id}'
+        if len(legacy_key) <= max_length:
+            return legacy_key
+        return f'gh:{int(greenhouse_id):x}'
+
     def __str__(self):
         return f'Control<{self.mode}>'
 

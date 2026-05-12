@@ -45,7 +45,7 @@ def _control_state(greenhouse_id: int | None = None):
         return control
     control, _ = ControlState.objects.get_or_create(
         greenhouse_id=greenhouse_id,
-        defaults={"singleton_key": f"greenhouse:{greenhouse_id}"[:20]},
+        defaults={"singleton_key": ControlState.singleton_key_for_greenhouse(greenhouse_id)},
     )
     return control
 

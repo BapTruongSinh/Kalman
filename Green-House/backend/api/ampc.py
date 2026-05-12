@@ -197,7 +197,7 @@ def _latest_control_state(greenhouse: Greenhouse | None = None) -> ControlState:
         return control
     control, _ = ControlState.objects.get_or_create(
         greenhouse=greenhouse,
-        defaults={'singleton_key': f'greenhouse:{greenhouse.id}'[:20]},
+        defaults={'singleton_key': ControlState.singleton_key_for_greenhouse(greenhouse.id)},
     )
     return control
 

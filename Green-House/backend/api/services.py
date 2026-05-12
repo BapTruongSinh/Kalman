@@ -217,7 +217,7 @@ def _force_manual_mode(reason: str, *, greenhouse: Greenhouse | None = None):
     else:
         control, _ = ControlState.objects.get_or_create(
             greenhouse=greenhouse,
-            defaults={'singleton_key': f'greenhouse:{greenhouse.id}'[:20]},
+            defaults={'singleton_key': ControlState.singleton_key_for_greenhouse(greenhouse.id)},
         )
 
     if control.mode == ControlState.Mode.MANUAL and control.manual_reason == reason:
@@ -236,7 +236,7 @@ def sync_control_mode_from_payload(payload: dict, *, greenhouse: Greenhouse | No
     else:
         control, _ = ControlState.objects.get_or_create(
             greenhouse=greenhouse,
-            defaults={'singleton_key': f'greenhouse:{greenhouse.id}'[:20]},
+            defaults={'singleton_key': ControlState.singleton_key_for_greenhouse(greenhouse.id)},
         )
 
     sensor_errors = payload.get('sensor_errors') or {}

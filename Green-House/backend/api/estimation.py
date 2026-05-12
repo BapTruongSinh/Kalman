@@ -157,6 +157,8 @@ def ensure_estimation_for_reading(
     existing_query = EstimationCycle.objects.filter(ingest_dedupe_key=ingest_dedupe_key)
     if run is not None:
         existing_query = existing_query.filter(run=run)
+    if greenhouse is not None:
+        existing_query = existing_query.filter(greenhouse=greenhouse)
     existing = existing_query.first()
     if existing is not None:
         return existing

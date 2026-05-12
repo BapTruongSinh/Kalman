@@ -444,7 +444,7 @@ class GreenHouseServerCutoverTests(TestCase):
         profile.actuator_enabled = True
         profile.save(update_fields=['actuator_enabled', 'updated_at'])
         ControlState.objects.update_or_create(
-            singleton_key=f'greenhouse:{self.greenhouse.id}'[:20],
+            singleton_key=ControlState.singleton_key_for_greenhouse(self.greenhouse.id),
             defaults={'greenhouse': self.greenhouse, 'mode': ControlState.Mode.AUTO},
         )
         Device.objects.create(
@@ -477,7 +477,7 @@ class GreenHouseServerCutoverTests(TestCase):
         profile.save(update_fields=['actuator_enabled', 'updated_at'])
         GreenhouseControlProfile.objects.filter(pk=profile.pk).update(root_depth_m=0.0)
         ControlState.objects.update_or_create(
-            singleton_key=f'greenhouse:{self.greenhouse.id}'[:20],
+            singleton_key=ControlState.singleton_key_for_greenhouse(self.greenhouse.id),
             defaults={'greenhouse': self.greenhouse, 'mode': ControlState.Mode.AUTO},
         )
         Device.objects.create(
@@ -542,7 +542,7 @@ class GreenHouseServerCutoverTests(TestCase):
         profile.actuator_enabled = True
         profile.save(update_fields=['actuator_enabled', 'updated_at'])
         ControlState.objects.update_or_create(
-            singleton_key=f'greenhouse:{self.greenhouse.id}'[:20],
+            singleton_key=ControlState.singleton_key_for_greenhouse(self.greenhouse.id),
             defaults={'greenhouse': self.greenhouse, 'mode': ControlState.Mode.AUTO},
         )
         Device.objects.create(
@@ -624,6 +624,36 @@ class GreenHouseServerCutoverTests(TestCase):
         self.assertLessEqual(len(state.singleton_key), max_length)
         self.assertEqual(state.singleton_key, 'gh:3b9aca00')
         self.assertEqual(state.greenhouse_id, large_greenhouse.id)
+
+    def test_control_state_key_handles_large_greenhouse_ids_without_collision(self):
+        first_greenhouse = Greenhouse.objects.create(
+            id=1_000_000_000,
+            owner=self.user,
+            name='GH-control-large-a',
+        )
+        second_greenhouse = Greenhouse.objects.create(
+            id=1_000_000_001,
+            owner=self.user,
+            name='GH-control-large-b',
+        )
+
+        first_key = ControlState.singleton_key_for_greenhouse(first_greenhouse.id)
+        second_key = ControlState.singleton_key_for_greenhouse(second_greenhouse.id)
+        first_state, _ = ControlState.objects.get_or_create(
+            greenhouse=first_greenhouse,
+            defaults={'singleton_key': first_key},
+        )
+        second_state, _ = ControlState.objects.get_or_create(
+            greenhouse=second_greenhouse,
+            defaults={'singleton_key': second_key},
+        )
+
+        max_length = ControlState._meta.get_field('singleton_key').max_length
+        self.assertLessEqual(len(first_key), max_length)
+        self.assertLessEqual(len(second_key), max_length)
+        self.assertNotEqual(first_key, second_key)
+        self.assertEqual(first_state.singleton_key, 'gh:3b9aca00')
+        self.assertEqual(second_state.singleton_key, 'gh:3b9aca01')
 
     def test_auto_settings_updates_greenhouse_profile_used_by_ampc(self):
         response = self.client.patch(
@@ -916,6 +946,35 @@ class GreenHouseServerCutoverTests(TestCase):
         self.assertLessEqual(cycle.kf_R, 4.0)
         self.assertGreater(cycle.kf_K, 0.7)
         self.assertGreater(cycle.kf_x_posterior, 55.0)
+
+    def test_live_kalman_dedupe_is_scoped_by_greenhouse_without_run(self):
+        sample_ts = timezone.now()
+        first_reading = SensorData.objects.create(
+            greenhouse=self.greenhouse,
+            recorded_at=sample_ts,
+            soil_moisture=60.0,
+            temperature=28.0,
+            humidity=70.0,
+            light=10000.0,
+        )
+        second_reading = SensorData.objects.create(
+            greenhouse=self.other_greenhouse,
+            recorded_at=sample_ts,
+            soil_moisture=42.0,
+            temperature=27.0,
+            humidity=71.0,
+            light=9000.0,
+        )
+
+        first_cycle = ensure_estimation_for_reading(first_reading, greenhouse=self.greenhouse)
+        second_cycle = ensure_estimation_for_reading(second_reading, greenhouse=self.other_greenhouse)
+        repeated_second = ensure_estimation_for_reading(second_reading, greenhouse=self.other_greenhouse)
+
+        self.assertNotEqual(first_cycle.id, second_cycle.id)
+        self.assertEqual(first_cycle.greenhouse_id, self.greenhouse.id)
+        self.assertEqual(second_cycle.greenhouse_id, self.other_greenhouse.id)
+        self.assertEqual(repeated_second.id, second_cycle.id)
+        self.assertEqual(EstimationCycle.objects.filter(ingest_dedupe_key=first_cycle.ingest_dedupe_key).count(), 2)
 
     def test_ampc_uses_raw_sensor_when_kalman_posterior_diverges(self):
         base_ts = timezone.now() - timedelta(minutes=20)
