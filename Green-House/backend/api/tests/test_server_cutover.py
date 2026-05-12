@@ -25,7 +25,7 @@ from api.models import (
     SensorData,
 )
 from api.ampc import run_auto_recommendation
-from api.ampc_scheduler import run_due_once
+from api.ampc_scheduler import get_scheduler_state, run_due_once
 from api.et0 import ET0Failure, ET0Reading
 from api.estimation import ensure_estimation_for_reading
 
@@ -599,12 +599,10 @@ class GreenHouseServerCutoverTests(TestCase):
         self.assertTrue(AMPCRecommendation.objects.filter(greenhouse=self.greenhouse).exists())
 
     def test_ampc_scheduler_stop_persists_disabled_state(self):
-        AMPCSchedulerState.objects.create(
-            singleton_key=f'greenhouse:{self.greenhouse.id}',
-            greenhouse=self.greenhouse,
-            is_enabled=True,
-            next_run_at=timezone.now(),
-        )
+        state = get_scheduler_state(greenhouse=self.greenhouse)
+        state.is_enabled = True
+        state.next_run_at = timezone.now()
+        state.save(update_fields=['is_enabled', 'next_run_at', 'updated_at'])
 
         response = self.client.post('/api/control/ampc-scheduler/stop/', {}, format='json')
 
@@ -612,6 +610,20 @@ class GreenHouseServerCutoverTests(TestCase):
         payload = response.json()
         self.assertFalse(payload['is_enabled'])
         self.assertIsNone(payload['next_run_at'])
+
+    def test_ampc_scheduler_key_handles_large_greenhouse_ids(self):
+        large_greenhouse = Greenhouse.objects.create(
+            id=1_000_000_000,
+            owner=self.user,
+            name='GH-large-id',
+        )
+
+        state = get_scheduler_state(greenhouse=large_greenhouse)
+
+        max_length = AMPCSchedulerState._meta.get_field('singleton_key').max_length
+        self.assertLessEqual(len(state.singleton_key), max_length)
+        self.assertEqual(state.singleton_key, 'gh:3b9aca00')
+        self.assertEqual(state.greenhouse_id, large_greenhouse.id)
 
     def test_auto_settings_updates_greenhouse_profile_used_by_ampc(self):
         response = self.client.patch(

@@ -25,7 +25,11 @@ _thread_lock = threading.Lock()
 
 
 def _scheduler_key_for_greenhouse(greenhouse_id: int) -> str:
-    return f'greenhouse:{greenhouse_id}'
+    max_length = AMPCSchedulerState._meta.get_field('singleton_key').max_length
+    legacy_key = f'greenhouse:{greenhouse_id}'
+    if len(legacy_key) <= max_length:
+        return legacy_key
+    return f'gh:{int(greenhouse_id):x}'
 
 
 def get_scheduler_state(user=None, greenhouse=None) -> AMPCSchedulerState:
