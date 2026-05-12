@@ -89,6 +89,12 @@ LEGACY_RUNTIME_NUMERIC_DEFAULTS = {
     "adaptive_max_abs_bias": 5.0,
     "stale_after_seconds": 600,
 }
+SENSOR_FIELD_BOUNDS = {
+    "soil_moisture": (0.0, 100.0),
+    "humidity": (0.0, 100.0),
+    "temperature": (-99.99, 99.99),
+    "light": (0.0, 99999999.99),
+}
 
 
 def _current_or_default(instance, attrs, field, default):
@@ -109,6 +115,20 @@ def _finite_runtime_value(instance, attrs, field, defaults):
     if not isfinite(value):
         raise serializers.ValidationError({field: f"{field} must be finite"})
     return value
+
+
+def _validate_sensor_numeric_fields(attrs):
+    for field, (min_value, max_value) in SENSOR_FIELD_BOUNDS.items():
+        value = attrs.get(field)
+        if value is None:
+            continue
+        value = float(value)
+        if not isfinite(value):
+            raise serializers.ValidationError({field: f"{field} must be finite"})
+        if not (min_value <= value <= max_value):
+            raise serializers.ValidationError({
+                field: f"{field} must satisfy {min_value} <= value <= {max_value}"
+            })
 
 
 def _apply_soil_preset(attrs):
@@ -585,6 +605,10 @@ class LiveSampleSerializer(serializers.Serializer):
     mist = serializers.FloatField(required=False, allow_null=True)
     fan = serializers.FloatField(required=False, allow_null=True)
 
+    def validate(self, attrs):
+        _validate_sensor_numeric_fields(attrs)
+        return attrs
+
 
 class IngestReadingSerializer(serializers.Serializer):
     recorded_at = serializers.DateTimeField(required=False)
@@ -603,10 +627,7 @@ class IngestReadingSerializer(serializers.Serializer):
     manual_reason = serializers.CharField(required=False, allow_blank=True)
 
     def validate(self, attrs):
-        for field in ("soil_moisture", "temperature", "humidity", "light"):
-            value = attrs.get(field)
-            if value is not None and not isfinite(float(value)):
-                raise serializers.ValidationError({field: f"{field} must be finite"})
+        _validate_sensor_numeric_fields(attrs)
         return attrs
 
 

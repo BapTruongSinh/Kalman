@@ -560,6 +560,74 @@ class GreenHouseServerCutoverTests(TestCase):
         self.assertEqual(SensorData.objects.count(), 0)
         self.assertEqual(EstimationCycle.objects.count(), 0)
 
+    def test_reading_ingest_rejects_out_of_range_sensor_payload(self):
+        cases = [
+            ({'soil_moisture': 100000.0}, 'soil_moisture'),
+            ({'soil_moisture': -0.01}, 'soil_moisture'),
+            ({'humidity': 100.01}, 'humidity'),
+            ({'temperature': 100.0}, 'temperature'),
+            ({'light': 100000000.0}, 'light'),
+        ]
+
+        for override, field in cases:
+            with self.subTest(field=field, override=override):
+                payload = {
+                    'recorded_at': timezone.now().isoformat(),
+                    'soil_moisture': 60.0,
+                    'temperature': 28.0,
+                    'humidity': 70.0,
+                    'light': 10000.0,
+                    **override,
+                }
+                response = self.client.post(
+                    '/api/ingest/readings/',
+                    payload,
+                    format='json',
+                    HTTP_X_DEVICE_TOKEN=settings.INGEST_DEVICE_TOKEN,
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.json())
+
+        self.assertEqual(SensorData.objects.count(), 0)
+        self.assertEqual(EstimationCycle.objects.count(), 0)
+
+    def test_ingest_samples_rejects_out_of_range_sensor_payload(self):
+        cases = [
+            ({'soil_moisture': 100000.0}, 'soil_moisture'),
+            ({'soil_moisture': -0.01}, 'soil_moisture'),
+            ({'humidity': 100.01}, 'humidity'),
+            ({'temperature': 100.0}, 'temperature'),
+            ({'light': 100000000.0}, 'light'),
+        ]
+
+        for override, field in cases:
+            with self.subTest(field=field, override=override):
+                payload = {
+                    'run_id': self.run.id,
+                    'timestamp': timezone.now().isoformat(),
+                    'soil_moisture': 60.0,
+                    'temperature': 28.0,
+                    'humidity': 70.0,
+                    'light': 10000.0,
+                    'drip': 0.0,
+                    'mist': 0.0,
+                    'fan': 0.0,
+                    **override,
+                }
+                response = self.client.post(
+                    '/api/ingest/samples/',
+                    payload,
+                    format='json',
+                    HTTP_X_DEVICE_TOKEN=settings.INGEST_DEVICE_TOKEN,
+                )
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.json())
+
+        self.assertEqual(SensorData.objects.count(), 0)
+        self.assertEqual(EstimationCycle.objects.count(), 0)
+
     def test_reading_ingest_missing_soil_does_not_create_usable_kalman_state(self):
         response = self.client.post(
             '/api/ingest/readings/',
