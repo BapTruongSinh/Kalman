@@ -38,6 +38,18 @@ function fieldTestId(field: string): string {
   return `auto-settings-${field.replaceAll("_", "-")}`;
 }
 
+export type AutoSettingsFormProps = {
+  profile: ControlProfile;
+  saving: boolean;
+  message: string;
+  error: string;
+  onSave: () => void;
+  onNumberChange: (field: AutoSettingsNumericField, value: string) => void;
+  onSoilTypeChange: (soilType: FaoSoilType) => void;
+  onAdaptiveEnabledChange: (checked: boolean) => void;
+  onActuatorEnabledChange: (checked: boolean) => void;
+};
+
 export function AutoSettings() {
   const [profile, setProfile] = useState<ControlProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -121,6 +133,32 @@ export function AutoSettings() {
   }
 
   return (
+    <AutoSettingsForm
+      profile={profile}
+      saving={saving}
+      message={message}
+      error={error}
+      onSave={save}
+      onNumberChange={updateNumber}
+      onSoilTypeChange={updateSoilType}
+      onAdaptiveEnabledChange={(checked) => setProfile({ ...profile, adaptive_enabled: checked })}
+      onActuatorEnabledChange={(checked) => setProfile({ ...profile, actuator_enabled: checked })}
+    />
+  );
+}
+
+export function AutoSettingsForm({
+  profile,
+  saving,
+  message,
+  error,
+  onSave,
+  onNumberChange,
+  onSoilTypeChange,
+  onAdaptiveEnabledChange,
+  onActuatorEnabledChange,
+}: AutoSettingsFormProps) {
+  return (
     <div className="elevated-card rounded-3xl p-5" data-testid="auto-settings-form">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
@@ -131,7 +169,7 @@ export function AutoSettings() {
             Lưu cấu hình FAO-56 cho mô hình Dr/RAW và giữ các ngưỡng sensor % để hiển thị legacy.
           </p>
         </div>
-        <Button onClick={save} disabled={saving} size="sm" data-testid="auto-settings-save">
+        <Button onClick={onSave} disabled={saving} size="sm" data-testid="auto-settings-save">
           <Save className="w-4 h-4 mr-2" />
           {saving ? "Đang lưu" : "Lưu"}
         </Button>
@@ -148,7 +186,7 @@ export function AutoSettings() {
             value={profile.soil_type}
             onValueChange={(value) => {
               if (isFaoSoilType(value)) {
-                updateSoilType(value);
+                onSoilTypeChange(value);
               }
             }}
           >
@@ -195,7 +233,7 @@ export function AutoSettings() {
                         step={field.step}
                         min={field.min}
                         max={field.max}
-                        onChange={(event) => updateNumber(field.field, event.target.value)}
+                        onChange={(event) => onNumberChange(field.field, event.target.value)}
                         aria-invalid={Boolean(error)}
                       />
                       {field.suffix && <span className="text-slate-400 shrink-0" style={{ fontSize: "11px" }}>{field.suffix}</span>}
@@ -212,7 +250,7 @@ export function AutoSettings() {
         <label className="flex items-center gap-2 text-slate-700" style={{ fontSize: "13px", fontWeight: 700 }}>
           <Switch
             checked={profile.adaptive_enabled}
-            onCheckedChange={(checked) => setProfile({ ...profile, adaptive_enabled: checked })}
+            onCheckedChange={onAdaptiveEnabledChange}
             data-testid="auto-settings-adaptive-enabled"
           />
           Bù sai số thích nghi
@@ -220,7 +258,7 @@ export function AutoSettings() {
         <label className="flex items-center gap-2 text-slate-700" style={{ fontSize: "13px", fontWeight: 700 }}>
           <Switch
             checked={profile.actuator_enabled}
-            onCheckedChange={(checked) => setProfile({ ...profile, actuator_enabled: checked })}
+            onCheckedChange={onActuatorEnabledChange}
             data-testid="auto-settings-actuator-enabled"
           />
           Tự động gửi lệnh bơm

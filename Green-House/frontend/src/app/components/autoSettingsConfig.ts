@@ -146,7 +146,63 @@ export function buildAutoSettingsPayload(profile: ControlProfile): Partial<Contr
   }, {});
 }
 
+const FINITE_NUMERIC_LABELS: Array<[AutoSettingsNumericField, string]> = [
+  ["crop_kc", "Kc cây trồng"],
+  ["latitude", "Vĩ độ"],
+  ["longitude", "Kinh độ"],
+  ["theta_fc", "theta_fc"],
+  ["theta_wp", "theta_wp"],
+  ["theta_sat", "theta_sat"],
+  ["root_depth_m", "Zr độ sâu rễ"],
+  ["depletion_fraction_p", "p depletion"],
+  ["pump_efficiency", "eta hiệu suất bơm"],
+  ["pump_flow_lps", "Q lưu lượng bơm"],
+  ["irrigation_area_m2", "A diện tích tưới"],
+  ["target_low", "Ngưỡng sensor thấp"],
+  ["target_high", "Ngưỡng sensor cao"],
+  ["pump_max_seconds", "Bơm tối đa mỗi bước"],
+  ["soft_daily_pump_cap_seconds", "Giới hạn bơm/ngày"],
+  ["weight_band", "Trọng số stress/overwater"],
+  ["weight_water", "Trọng số tiết kiệm nước"],
+  ["weight_switch", "Trọng số đổi lệnh"],
+  ["weight_daily", "Trọng số giới hạn ngày"],
+  ["weight_terminal", "Trọng số cuối chu kỳ"],
+];
+
+const NON_NEGATIVE_NUMERIC_LABELS: Array<[AutoSettingsNumericField, string]> = [
+  ["crop_kc", "Kc cây trồng"],
+  ["weight_band", "Trọng số stress/overwater"],
+  ["weight_water", "Trọng số tiết kiệm nước"],
+  ["weight_switch", "Trọng số đổi lệnh"],
+  ["weight_daily", "Trọng số giới hạn ngày"],
+  ["weight_terminal", "Trọng số cuối chu kỳ"],
+];
+
+function validateFiniteNumbers(profile: ControlProfile): string {
+  for (const [field, label] of FINITE_NUMERIC_LABELS) {
+    if (!Number.isFinite(profile[field])) {
+      return `${label} phải là số hữu hạn.`;
+    }
+  }
+  return "";
+}
+
+function validateNonNegativeNumbers(profile: ControlProfile): string {
+  for (const [field, label] of NON_NEGATIVE_NUMERIC_LABELS) {
+    if (profile[field] < 0) {
+      return `${label} phải lớn hơn hoặc bằng 0.`;
+    }
+  }
+  return "";
+}
+
 export function validateAutoSettings(profile: ControlProfile): string {
+  const finiteError = validateFiniteNumbers(profile);
+  if (finiteError) return finiteError;
+
+  const nonNegativeError = validateNonNegativeNumbers(profile);
+  if (nonNegativeError) return nonNegativeError;
+
   const thetaValid =
     0 <= profile.theta_wp &&
     profile.theta_wp < profile.theta_fc &&
@@ -170,6 +226,8 @@ export function validateAutoSettings(profile: ControlProfile): string {
   if (!(0 <= profile.target_low && profile.target_low < profile.target_high && profile.target_high <= 100)) {
     return "Ngưỡng sensor phải thỏa 0 <= thấp < cao <= 100.";
   }
+  if (profile.pump_max_seconds <= 0) return "Bơm tối đa mỗi bước phải lớn hơn 0.";
+  if (profile.soft_daily_pump_cap_seconds <= 0) return "Giới hạn bơm/ngày phải lớn hơn 0.";
   return "";
 }
 

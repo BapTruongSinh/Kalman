@@ -68,3 +68,4 @@ This task does not change the forecast chart yet.
 |------|--------------|-------|
 | 2026-05-12 | Codex | Task created from FAO-56 AMPC plan |
 | 2026-05-12 | Codex | Implemented frontend FAO controls, soil presets, client validation, save payload builder, smoke coverage, and handoff docs. |
+| 2026-05-12 | Codex | Fixed review findings: client and backend now reject invalid runtime config values, and frontend smoke test executes helper behavior plus server-renders the loaded settings form. |

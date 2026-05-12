@@ -524,6 +524,24 @@ class GreenHouseServerCutoverTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn('pump_efficiency', response.json())
 
+    def test_auto_settings_rejects_invalid_runtime_config_values(self):
+        cases = [
+            ({'crop_kc': -0.1}, 'crop_kc'),
+            ({'weight_band': -1.0}, 'cost_band_violation'),
+            ({'weight_water': -1.0}, 'cost_water_use'),
+            ({'weight_switch': -1.0}, 'cost_switching'),
+            ({'weight_daily': -1.0}, 'cost_daily_cap_excess'),
+            ({'weight_terminal': -1.0}, 'cost_terminal_band_violation'),
+            ({'soft_daily_pump_cap_seconds': 0.0}, 'soft_daily_pump_cap_seconds'),
+        ]
+
+        for payload, field in cases:
+            with self.subTest(field=field, payload=payload):
+                response = self.client.patch('/api/auto-settings/', payload, format='json')
+
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(field, response.json())
+
     def test_other_users_greenhouse_control_profile_cannot_be_updated(self):
         response = self.client.patch(
             f'/api/greenhouses/{self.other_greenhouse.id}/control-profile/',

@@ -50,6 +50,45 @@ FAO56_NUMERIC_DEFAULTS = {
     "pump_flow_lps": 0.02,
     "irrigation_area_m2": 0.25,
 }
+GREENHOUSE_RUNTIME_NUMERIC_DEFAULTS = {
+    "crop_kc": 1.0,
+    "target_low": 55.0,
+    "target_high": 65.0,
+    "step_seconds": 300,
+    "horizon_steps": 12,
+    "pump_min_seconds": 0.0,
+    "pump_max_seconds": 300.0,
+    "pump_grid_seconds": 30.0,
+    "soft_daily_pump_cap_seconds": 1800.0,
+    "cost_band_violation": 10.0,
+    "cost_water_use": 0.2,
+    "cost_switching": 0.5,
+    "cost_daily_cap_excess": 2.0,
+    "cost_terminal_band_violation": 20.0,
+    "adaptive_bias_window": 12,
+    "adaptive_max_abs_bias": 5.0,
+    "safety_stale_after_seconds": 600,
+    "actuator_timeout_seconds": 5.0,
+}
+LEGACY_RUNTIME_NUMERIC_DEFAULTS = {
+    "crop_kc": 1.0,
+    "target_low": 55.0,
+    "target_high": 65.0,
+    "step_seconds": 300,
+    "horizon_steps": 12,
+    "pump_min_seconds": 0.0,
+    "pump_max_seconds": 300.0,
+    "pump_grid_seconds": 30.0,
+    "soft_daily_pump_cap_seconds": 1800.0,
+    "weight_band": 10.0,
+    "weight_water": 0.2,
+    "weight_switch": 0.5,
+    "weight_daily": 2.0,
+    "weight_terminal": 20.0,
+    "adaptive_bias_window": 12,
+    "adaptive_max_abs_bias": 5.0,
+    "stale_after_seconds": 600,
+}
 
 
 def _current_or_default(instance, attrs, field, default):
@@ -60,6 +99,13 @@ def _current_or_default(instance, attrs, field, default):
 
 def _finite_fao_value(instance, attrs, field):
     value = float(_current_or_default(instance, attrs, field, FAO56_NUMERIC_DEFAULTS[field]))
+    if not isfinite(value):
+        raise serializers.ValidationError({field: f"{field} must be finite"})
+    return value
+
+
+def _finite_runtime_value(instance, attrs, field, defaults):
+    value = float(_current_or_default(instance, attrs, field, defaults[field]))
     if not isfinite(value):
         raise serializers.ValidationError({field: f"{field} must be finite"})
     return value
@@ -115,6 +161,59 @@ def _validate_fao56_physical_config(instance, attrs):
         raise serializers.ValidationError({"pump_flow_lps": "pump_flow_lps must be > 0"})
     if irrigation_area_m2 <= 0:
         raise serializers.ValidationError({"irrigation_area_m2": "irrigation_area_m2 must be > 0"})
+
+
+def _validate_runtime_common(
+    instance,
+    attrs,
+    defaults,
+    cost_fields,
+    stale_field,
+    actuator_timeout_field=None,
+):
+    crop_kc = _finite_runtime_value(instance, attrs, "crop_kc", defaults)
+    target_low = _finite_runtime_value(instance, attrs, "target_low", defaults)
+    target_high = _finite_runtime_value(instance, attrs, "target_high", defaults)
+    step_seconds = _finite_runtime_value(instance, attrs, "step_seconds", defaults)
+    horizon_steps = _finite_runtime_value(instance, attrs, "horizon_steps", defaults)
+    pump_min = _finite_runtime_value(instance, attrs, "pump_min_seconds", defaults)
+    pump_max = _finite_runtime_value(instance, attrs, "pump_max_seconds", defaults)
+    pump_grid = _finite_runtime_value(instance, attrs, "pump_grid_seconds", defaults)
+    soft_daily_cap = _finite_runtime_value(instance, attrs, "soft_daily_pump_cap_seconds", defaults)
+    adaptive_bias_window = _finite_runtime_value(instance, attrs, "adaptive_bias_window", defaults)
+    adaptive_max_abs_bias = _finite_runtime_value(instance, attrs, "adaptive_max_abs_bias", defaults)
+    stale_after_seconds = _finite_runtime_value(instance, attrs, stale_field, defaults)
+
+    if crop_kc < 0:
+        raise serializers.ValidationError({"crop_kc": "crop_kc must be >= 0"})
+    if not (0.0 <= target_low < target_high <= 100.0):
+        raise serializers.ValidationError("target_low/target_high must satisfy 0 <= low < high <= 100")
+    if step_seconds <= 0:
+        raise serializers.ValidationError({"step_seconds": "step_seconds must be > 0"})
+    if horizon_steps < 1:
+        raise serializers.ValidationError({"horizon_steps": "horizon_steps must be >= 1"})
+    if pump_min < 0 or pump_max <= pump_min:
+        raise serializers.ValidationError("pump_max_seconds must be greater than pump_min_seconds")
+    if pump_grid <= 0 or pump_grid > pump_max:
+        raise serializers.ValidationError("pump_grid_seconds must be > 0 and <= pump_max_seconds")
+    if soft_daily_cap <= 0:
+        raise serializers.ValidationError({
+            "soft_daily_pump_cap_seconds": "soft_daily_pump_cap_seconds must be > 0"
+        })
+    for field in cost_fields:
+        value = _finite_runtime_value(instance, attrs, field, defaults)
+        if value < 0:
+            raise serializers.ValidationError({field: f"{field} must be >= 0"})
+    if adaptive_bias_window < 1:
+        raise serializers.ValidationError({"adaptive_bias_window": "adaptive_bias_window must be >= 1"})
+    if adaptive_max_abs_bias < 0:
+        raise serializers.ValidationError({"adaptive_max_abs_bias": "adaptive_max_abs_bias must be >= 0"})
+    if stale_after_seconds <= 0:
+        raise serializers.ValidationError({stale_field: f"{stale_field} must be > 0"})
+    if actuator_timeout_field is not None:
+        actuator_timeout = _finite_runtime_value(instance, attrs, actuator_timeout_field, defaults)
+        if actuator_timeout <= 0:
+            raise serializers.ValidationError({actuator_timeout_field: f"{actuator_timeout_field} must be > 0"})
 
 
 class LoginSerializer(TokenObtainPairSerializer):
@@ -338,17 +437,19 @@ class ControlProfileSerializer(serializers.ModelSerializer):
         ]
 
     def validate(self, attrs):
-        target_low = attrs.get("target_low", getattr(self.instance, "target_low", 55.0))
-        target_high = attrs.get("target_high", getattr(self.instance, "target_high", 65.0))
-        pump_min = attrs.get("pump_min_seconds", getattr(self.instance, "pump_min_seconds", 0.0))
-        pump_max = attrs.get("pump_max_seconds", getattr(self.instance, "pump_max_seconds", 300.0))
-        pump_grid = attrs.get("pump_grid_seconds", getattr(self.instance, "pump_grid_seconds", 30.0))
-        if not (0.0 <= target_low < target_high <= 100.0):
-            raise serializers.ValidationError("target_low/target_high must satisfy 0 <= low < high <= 100")
-        if pump_min < 0 or pump_max <= pump_min:
-            raise serializers.ValidationError("pump_max_seconds must be greater than pump_min_seconds")
-        if pump_grid <= 0 or pump_grid > pump_max:
-            raise serializers.ValidationError("pump_grid_seconds must be > 0 and <= pump_max_seconds")
+        _validate_runtime_common(
+            self.instance,
+            attrs,
+            LEGACY_RUNTIME_NUMERIC_DEFAULTS,
+            (
+                "weight_band",
+                "weight_water",
+                "weight_switch",
+                "weight_daily",
+                "weight_terminal",
+            ),
+            "stale_after_seconds",
+        )
         return attrs
 
 
@@ -390,17 +491,20 @@ class GreenhouseControlProfileSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = _apply_soil_preset(attrs)
-        target_low = attrs.get("target_low", getattr(self.instance, "target_low", 55.0))
-        target_high = attrs.get("target_high", getattr(self.instance, "target_high", 65.0))
-        pump_min = attrs.get("pump_min_seconds", getattr(self.instance, "pump_min_seconds", 0.0))
-        pump_max = attrs.get("pump_max_seconds", getattr(self.instance, "pump_max_seconds", 300.0))
-        pump_grid = attrs.get("pump_grid_seconds", getattr(self.instance, "pump_grid_seconds", 30.0))
-        if not (0.0 <= target_low < target_high <= 100.0):
-            raise serializers.ValidationError("target_low/target_high must satisfy 0 <= low < high <= 100")
-        if pump_min < 0 or pump_max <= pump_min:
-            raise serializers.ValidationError("pump_max_seconds must be greater than pump_min_seconds")
-        if pump_grid <= 0 or pump_grid > pump_max:
-            raise serializers.ValidationError("pump_grid_seconds must be > 0 and <= pump_max_seconds")
+        _validate_runtime_common(
+            self.instance,
+            attrs,
+            GREENHOUSE_RUNTIME_NUMERIC_DEFAULTS,
+            (
+                "cost_band_violation",
+                "cost_water_use",
+                "cost_switching",
+                "cost_daily_cap_excess",
+                "cost_terminal_band_violation",
+            ),
+            "safety_stale_after_seconds",
+            "actuator_timeout_seconds",
+        )
         _validate_fao56_physical_config(self.instance, attrs)
         return attrs
 
