@@ -1202,13 +1202,63 @@ class GreenHouseServerCutoverTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIsNone(response.json()['recommendation'])
 
+    def test_forecast_uses_newer_estimation_cycles_for_latest_and_history(self):
+        sensor_ts = timezone.now() - timedelta(days=1)
+        SensorData.objects.create(
+            greenhouse=self.greenhouse,
+            recorded_at=sensor_ts,
+            soil_moisture=40.0,
+            temperature=24.0,
+            humidity=60.0,
+            light=1000.0,
+        )
+        base_ts = timezone.now().replace(second=0, microsecond=0)
+        latest_cycle = None
+        for index, soil in enumerate([58.0, 59.0, 60.0, 61.0, 62.0, 63.0]):
+            latest_cycle = EstimationCycle.objects.create(
+                sample_ts=base_ts + timedelta(minutes=index * 5),
+                cycle_index=index,
+                greenhouse=self.greenhouse,
+                slice_type='online',
+                source_type='live',
+                validation_status='valid',
+                preprocess_status=EstimationCycle.PreprocessStatus.VALID,
+                cycle_status=EstimationCycle.CycleStatus.OK,
+                adaptive_status=EstimationCycle.AdaptiveStatus.R_SKIPPED,
+                raw_soil_moisture=soil,
+                raw_temperature=28.0 + index,
+                raw_humidity=70.0 + index,
+                raw_light=10000.0 + index,
+                raw_drip=0.0,
+                raw_mist=0.0,
+                raw_fan=0.0,
+                arx_predicted=soil,
+                kf_x_prior=soil,
+                kf_P_prior=1.0,
+                kf_innovation=0.0,
+                kf_R=1.0,
+                kf_K=0.8,
+                kf_x_posterior=soil + 0.5,
+                kf_P_posterior=0.5,
+                ingest_dedupe_key=f'forecast-estimation-history-{index}',
+            )
+
+        response = self.client.get('/api/forecast/')
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload['latest']['id'], latest_cycle.id)
+        self.assertEqual(payload['latest']['recorded_at'], latest_cycle.sample_ts.isoformat().replace('+00:00', 'Z'))
+        self.assertEqual(payload['latest']['soil_moisture'], latest_cycle.raw_soil_moisture)
+        self.assertEqual(payload['latest']['payload']['source'], 'estimation_cycle')
+        self.assertEqual([row['soil_moisture'] for row in payload['history']], [58.0, 59.0, 60.0, 61.0, 62.0, 63.0])
+
     def test_malformed_query_params_return_400(self):
         cases = [
             '/api/sensor-readings/chart/?metric=soil_moisture&hours=bad',
             '/api/sensor-readings/history/?page=bad',
             '/api/sensor-readings/history/?hours=bad',
             f'/api/runs/{self.run.id}/series/?limit=bad',
-            '/api/mpc-test/series/?limit=bad',
         ]
 
         for url in cases:
@@ -1216,47 +1266,6 @@ class GreenHouseServerCutoverTests(TestCase):
                 response = self.client.get(url)
 
                 self.assertEqual(response.status_code, 400)
-
-    def test_mpc_test_series_filters_seed_tag_before_limit(self):
-        tagged = AMPCRecommendation.objects.create(
-            greenhouse=self.greenhouse,
-            pump_seconds=12.0,
-            step_seconds=300,
-            safety_status='safe',
-            reason='manual_seed',
-            predicted_soil_moisture=[61.0],
-            target_band={'low': 55.0, 'high': 65.0},
-            config_snapshot={'mpc_test_source': 'manual_mpc_test_seed'},
-            state_snapshot={
-                'sample_ts': timezone.now().isoformat(),
-                'actual_soil_moisture': 60.0,
-                'mpc_soil_moisture': 61.0,
-            },
-        )
-        for index in range(501):
-            AMPCRecommendation.objects.create(
-                greenhouse=self.greenhouse,
-                pump_seconds=0.0,
-                step_seconds=300,
-                safety_status='safe',
-                reason=f'live_{index}',
-                predicted_soil_moisture=[60.0],
-                target_band={'low': 55.0, 'high': 65.0},
-                config_snapshot={'source': 'live'},
-            )
-
-        response = self.client.get('/api/mpc-test/series/')
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload['total_selected'], 1)
-        self.assertEqual(payload['points'][0]['reason'], tagged.reason)
-
-    @override_settings(DEBUG=False)
-    def test_kalman_test_series_requires_staff_outside_debug(self):
-        response = self.client.get('/api/kalman-test/series/')
-
-        self.assertEqual(response.status_code, 403)
 
     def test_ampc_scheduler_recovers_stale_execution_lease(self):
         state = AMPCSchedulerState.objects.create(

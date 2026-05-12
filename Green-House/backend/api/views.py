@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import timedelta
 
 from django.conf import settings
-from django.db import DatabaseError, connection
 from django.db.models import Q
 from django.http import Http404
 from django.utils import timezone
@@ -15,7 +14,6 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .models import (
-    AMPCRecommendation,
     Alert,
     ControlState,
     Device,
@@ -232,6 +230,53 @@ def _alert_queryset(greenhouse: Greenhouse):
     )
 
 
+def _forecast_reading_from_estimation(cycle: EstimationCycle) -> dict:
+    return {
+        'id': cycle.id,
+        'temperature': cycle.raw_temperature,
+        'humidity': cycle.raw_humidity,
+        'light': cycle.raw_light,
+        'soil_moisture': cycle.raw_soil_moisture,
+        'payload': {
+            'source': 'estimation_cycle',
+            'cycle_index': cycle.cycle_index,
+            'kf_x_posterior': cycle.kf_x_posterior,
+        },
+        'recorded_at': cycle.sample_ts,
+    }
+
+
+def _forecast_latest_and_history(greenhouse: Greenhouse, estimation: EstimationCycle | None):
+    latest_sensor = SensorData.objects.filter(greenhouse=greenhouse).order_by('-recorded_at', '-id').first()
+    use_estimation_history = (
+        estimation is not None
+        and (
+            latest_sensor is None
+            or estimation.sample_ts > latest_sensor.recorded_at
+        )
+    )
+
+    if use_estimation_history:
+        cycles = (
+            EstimationCycle.objects
+            .filter(greenhouse=greenhouse)
+            .exclude(raw_soil_moisture__isnull=True)
+            .exclude(raw_temperature__isnull=True)
+            .exclude(raw_humidity__isnull=True)
+            .exclude(raw_light__isnull=True)
+            .order_by('-sample_ts', '-id')[:6]
+        )
+        history = [_forecast_reading_from_estimation(item) for item in reversed(list(cycles))]
+        return _forecast_reading_from_estimation(estimation), history
+
+    history_rows = SensorData.objects.filter(greenhouse=greenhouse).order_by('-recorded_at', '-id')[:6]
+    history = [
+        SensorDataSerializer(item).data
+        for item in reversed(list(history_rows))
+    ]
+    return SensorDataSerializer(latest_sensor).data if latest_sensor else None, history
+
+
 def _ingest_greenhouse(request, auth_device: Device | None) -> Greenhouse:
     greenhouse_id = request.data.get('greenhouse_id') or request.query_params.get('greenhouse_id')
 
@@ -423,19 +468,13 @@ class ControlModeView(APIView):
 class ForecastView(APIView):
     def get(self, request):
         greenhouse = default_greenhouse(request.user)
-        latest = SensorData.objects.filter(greenhouse=greenhouse).order_by('-recorded_at', '-id').first()
         estimation = latest_estimation(greenhouse=greenhouse)
         recommendation = latest_recommendation_for_greenhouse(greenhouse)
         scheduler_state = get_scheduler_state(greenhouse=greenhouse)
-
-        history_rows = SensorData.objects.filter(greenhouse=greenhouse).order_by('-recorded_at', '-id')[:6]
-        history = [
-            SensorDataSerializer(item).data
-            for item in reversed(list(history_rows))
-        ]
+        latest, history = _forecast_latest_and_history(greenhouse, estimation)
 
         return Response({
-            'latest': SensorDataSerializer(latest).data if latest else None,
+            'latest': latest,
             'estimation': EstimationCycleSerializer(estimation).data if estimation else None,
             'recommendation': AMPCRecommendationSerializer(recommendation).data if recommendation else None,
             'scheduler': AMPCSchedulerStateSerializer(scheduler_state).data,
@@ -524,128 +563,6 @@ class RunMetricsView(APIView):
         if summary is None:
             return Response({'detail': 'metrics_not_found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(EvaluationSummarySerializer(summary).data)
-
-
-class KalmanTestSeriesView(APIView):
-    def get(self, request):
-        if not settings.DEBUG and not request.user.is_staff:
-            raise PermissionDenied('kalman_test_series_staff_only')
-
-        limit = _query_int(request, 'limit', 100000, min_value=1, max_value=100000)
-        database_name = getattr(settings, 'KALMAN_TEST_DB_NAME', 'kalman_greenhouse')
-        table_name = 'pipeline_cycles'
-        quoted_database = database_name.replace('`', '``')
-
-        query = f"""
-            SELECT
-                id,
-                greenhouse_id,
-                run_id,
-                sample_ts,
-                cycle_index,
-                slice_type,
-                source_type,
-                raw_soil_moisture,
-                raw_temperature,
-                raw_humidity,
-                raw_light,
-                raw_drip,
-                raw_mist,
-                raw_fan,
-                preprocess_status,
-                arx_predicted,
-                kf_x_prior,
-                kf_P_prior,
-                kf_innovation,
-                kf_R,
-                kf_K,
-                kf_x_posterior,
-                kf_P_posterior,
-                cycle_status,
-                error_message,
-                adaptive_status,
-                latency_ms
-            FROM (
-                SELECT *
-                FROM `{quoted_database}`.`{table_name}`
-                WHERE raw_soil_moisture IS NOT NULL
-                  AND kf_x_posterior IS NOT NULL
-                ORDER BY sample_ts DESC, id DESC
-                LIMIT %s
-            ) recent
-            ORDER BY sample_ts ASC, id ASC
-        """
-        try:
-            with connection.cursor() as cursor:
-                cursor.execute(query, [limit])
-                columns = [column[0] for column in cursor.description]
-                rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
-        except DatabaseError as exc:
-            return Response(
-                {
-                    'detail': 'kalman_test_source_unavailable',
-                    'source_database': database_name,
-                    'source_table': table_name,
-                    'error': str(exc),
-                },
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-
-        return Response({
-            'source_database': database_name,
-            'source_table': table_name,
-            'limit': limit,
-            'total_selected': len(rows),
-            'points': rows,
-        })
-
-
-class MPCTestSeriesView(APIView):
-    def get(self, request):
-        greenhouse = default_greenhouse(request.user)
-        limit = _query_int(request, 'limit', 5000, min_value=1, max_value=100000)
-        queryset = (
-            AMPCRecommendation.objects
-            .filter(
-                greenhouse=greenhouse,
-                config_snapshot__mpc_test_source='manual_mpc_test_seed',
-            )
-            .select_related('sensor_data')
-            .order_by('created_at', 'id')[:limit]
-        )
-
-        rows = list(queryset)
-        points = []
-        for audit in rows:
-            state = audit.state_snapshot or {}
-            sensor = audit.sensor_data
-            sample_ts = (
-                state.get('sample_ts')
-                or (sensor.recorded_at.isoformat() if sensor else None)
-                or audit.created_at.isoformat()
-            )
-            actual = state.get('actual_soil_moisture')
-            if actual is None and sensor is not None and sensor.soil_moisture is not None:
-                actual = float(sensor.soil_moisture)
-            points.append({
-                'timestamp': sample_ts,
-                'actual_soil_moisture': actual,
-                'mpc_soil_moisture': state.get('mpc_soil_moisture'),
-                'rule_based_soil_moisture': state.get('rule_based_soil_moisture'),
-                'mpc_pump_seconds': audit.pump_seconds,
-                'rule_based_pump_seconds': state.get('rule_based_pump_seconds'),
-                'target_low': audit.target_band.get('low', 55.0),
-                'target_high': audit.target_band.get('high', 65.0),
-                'safety_status': audit.safety_status,
-                'reason': audit.reason,
-            })
-
-        return Response({
-            'greenhouse_id': greenhouse.id,
-            'source_table': 'ampc_recommendations',
-            'total_selected': len(points),
-            'points': points,
-        })
 
 
 class GreenhouseControlProfileView(APIView):

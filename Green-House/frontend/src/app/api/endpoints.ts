@@ -98,40 +98,6 @@ export const getRuns = () => apiClient.get<RunItem[]>("/runs/");
 export const getRunSeries = (runId: number, limit = 500) =>
   apiClient.get<EstimationCycle[]>(`/runs/${runId}/series/?limit=${limit}`);
 
-export interface KalmanTestSeriesResponse {
-  source_database: string;
-  source_table: string;
-  limit: number;
-  total_selected: number;
-  points: EstimationCycle[];
-}
-
-export const getKalmanTestSeries = (limit = 100000) =>
-  apiClient.get<KalmanTestSeriesResponse>(`/kalman-test/series/?limit=${limit}`);
-
-export interface MPCTestPoint {
-  timestamp: string;
-  actual_soil_moisture: number | null;
-  mpc_soil_moisture: number | null;
-  rule_based_soil_moisture: number | null;
-  mpc_pump_seconds: number | null;
-  rule_based_pump_seconds: number | null;
-  target_low: number;
-  target_high: number;
-  safety_status: string;
-  reason: string;
-}
-
-export interface MPCTestSeriesResponse {
-  greenhouse_id: number;
-  source_table: string;
-  total_selected: number;
-  points: MPCTestPoint[];
-}
-
-export const getMPCTestSeries = () =>
-  apiClient.get<MPCTestSeriesResponse>("/mpc-test/series/");
-
 export interface AMPCRecommendation {
   id: number;
   sensor_data: number | null;

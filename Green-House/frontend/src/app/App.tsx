@@ -9,8 +9,6 @@ import { AutoSettings } from "./components/AutoSettings";
 import { StatusBar } from "./components/StatusBar";
 import { Alerts } from "./components/Alerts";
 import { ForecastPage } from "./components/ForecastPage";
-import { KalmanTestPage } from "./components/KalmanTestPage";
-import { MPCTestPage } from "./components/MPCTestPage";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { LoginPage } from "./pages/LoginPage";
 import { RealtimeProvider, useRealtime } from "./contexts/RealtimeContext";
@@ -37,8 +35,6 @@ function Dashboard() {
               {activeMenu === "sensors" && "Quản lý cảm biến"}
               {activeMenu === "history" && "Lịch sử cảm biến"}
               {activeMenu === "forecast" && "Dự báo sắp tới"}
-              {activeMenu === "kalman-test" && "Đánh giá Kalman Filter"}
-              {activeMenu === "mpc-test" && "Đánh giá MPC"}
               {activeMenu === "devices" && "Điều khiển thiết bị"}
               {activeMenu === "zones" && "Quản lý khu vực"}
               {activeMenu === "charts" && "Biểu đồ & Báo cáo"}
@@ -93,8 +89,6 @@ function Dashboard() {
         {activeMenu === "history" && <SensorHistory />}
 
         {activeMenu === "forecast" && <ForecastPage />}
-        {activeMenu === "kalman-test" && <KalmanTestPage />}
-        {activeMenu === "mpc-test" && <MPCTestPage />}
 
         {activeMenu === "devices" && (
           <div className="max-w-lg">

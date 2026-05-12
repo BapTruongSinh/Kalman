@@ -9,8 +9,6 @@ import {
   ChevronRight,
   History,
   TrendingUp,
-  Activity,
-  LineChart,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -24,8 +22,6 @@ const menuItems = [
   { id: "sensors", label: "Cảm biến", icon: Thermometer, badge: "4" },
   { id: "history", label: "Lịch sử cảm biến", icon: History, badge: null },
   { id: "forecast", label: "Dự báo", icon: TrendingUp, badge: null },
-  { id: "kalman-test", label: "Test Kalman", icon: Activity, badge: null },
-  { id: "mpc-test", label: "Test MPC", icon: LineChart, badge: null },
   { id: "devices", label: "Thiết bị", icon: Cpu, badge: null },
   { id: "charts", label: "Biểu đồ", icon: BarChart3, badge: null },
   { id: "alerts", label: "Cảnh báo", icon: Bell, badge: "2" },
