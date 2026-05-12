@@ -150,7 +150,41 @@ export interface AMPCRecommendation {
   used_today_pump_seconds: number;
   command_created: boolean;
   actuator_status: string;
+  config_snapshot?: Record<string, unknown> | null;
+  state_snapshot?: AMPCStateSnapshot | null;
   created_at: string;
+}
+
+export interface Fao56Audit {
+  initial_theta?: number | null;
+  initial_dr?: number | null;
+  taw?: number | null;
+  raw?: number | null;
+  ks?: number | null;
+  et0_step?: number | null;
+  etc_adj?: number | null;
+  irrigation_depth_mm?: number | null;
+  predicted_dr?: Array<number | null>;
+  predicted_soil_moisture?: Array<number | null>;
+}
+
+export interface ET0Audit {
+  requested_hour?: string;
+  et0_hour_mm?: number | null;
+  et0_step_mm?: number | null;
+  step_seconds?: number | null;
+  source?: string;
+  fetched_at?: string;
+  reason?: string;
+  fail_closed?: boolean;
+}
+
+export interface AMPCStateSnapshot {
+  fao56?: Fao56Audit | null;
+  et0?: ET0Audit | null;
+  fail_closed?: boolean;
+  config_error?: string;
+  [key: string]: unknown;
 }
 
 export interface AMPCSchedulerState {

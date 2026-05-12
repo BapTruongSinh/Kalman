@@ -1,15 +1,15 @@
 ---
 id: "005"
 title: "Show FAO audit data in forecast/dashboard without breaking percent chart"
-status: "todo"
+status: "completed"
 area: "frontend"
 agent: "@builder"
 required_skills: ["frontend", "quality", "docs"]
 priority: "normal"
 created_at: "2026-05-12"
 due_date: null
-started_at: null
-completed_at: null
+started_at: "2026-05-12"
+completed_at: "2026-05-12"
 prd_refs: []
 blocks: ["006"]
 blocked_by: ["003"]
@@ -23,9 +23,9 @@ The user-facing chart remains sensor percent. Physical fields are shown as audit
 
 ## Acceptance Criteria
 
-- [ ] Extend frontend API types for FAO audit data returned by recommendation endpoints.
-- [ ] Keep existing forecast line based on `predicted_soil_moisture` percent.
-- [ ] Add compact diagnostics for:
+- [x] Extend frontend API types for FAO audit data returned by recommendation endpoints.
+- [x] Keep existing forecast line based on `predicted_soil_moisture` percent.
+- [x] Add compact diagnostics for:
   - `Dr`
   - `TAW`
   - `RAW`
@@ -33,19 +33,19 @@ The user-facing chart remains sensor percent. Physical fields are shown as audit
   - `ET0_step`
   - `ETc_adj`
   - `irrigation_depth_mm`
-- [ ] Show stress status:
+- [x] Show stress status:
   - safe zone when `Dr <= RAW`
   - water stress when `Dr > RAW`
   - wet/no-irrigation state when `Dr = 0`
-- [ ] Do not show raw internal stack traces or confusing backend error details.
-- [ ] Frontend tests cover rendering with and without FAO audit fields.
+- [x] Do not show raw internal stack traces or confusing backend error details.
+- [x] Frontend tests cover rendering with and without FAO audit fields.
 
 ## Completion Gates
 
-- [ ] Logic: Percent chart remains compatible with old response shape; diagnostics are optional and null-safe.
-- [ ] Nghiệp vụ: UI explains control status through physical FAO values without implying `55% sensor = theta 0.55`.
-- [ ] Security: Error display is safe and does not leak backend internals.
-- [ ] Test chạy thực tế: `cd Green-House\frontend; npm test` and `npm run build` pass.
+- [x] Logic: Percent chart remains compatible with old response shape; diagnostics are optional and null-safe.
+- [x] Nghiệp vụ: UI explains control status through physical FAO values without implying `55% sensor = theta 0.55`.
+- [x] Security: Error display is safe and does not leak backend internals.
+- [x] Test chạy thực tế: `cd Green-House\frontend; npm test` and `npm run build` pass.
 
 ## Technical Notes
 
@@ -59,3 +59,4 @@ The user-facing chart remains sensor percent. Physical fields are shown as audit
 | Date | Agent / Human | Event |
 |------|--------------|-------|
 | 2026-05-12 | Codex | Task created from FAO-56 AMPC plan |
+| 2026-05-12 | Codex | Implemented forecast FAO audit panel, API audit types, safe error normalization, percent-chart regression helper, and smoke tests for audit/no-audit rendering. |

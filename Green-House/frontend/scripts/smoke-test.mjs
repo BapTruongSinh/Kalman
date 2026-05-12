@@ -76,6 +76,7 @@ const vite = await createServer({
 try {
   const configModule = await vite.ssrLoadModule("/src/app/components/autoSettingsConfig.ts");
   const autoSettingsModule = await vite.ssrLoadModule("/src/app/components/AutoSettings.tsx");
+  const forecastModule = await vite.ssrLoadModule("/src/app/components/ForecastPage.tsx");
 
   const {
     applySoilPreset,
@@ -85,6 +86,12 @@ try {
     validateAutoSettings,
   } = configModule;
   const { AutoSettingsForm } = autoSettingsModule;
+  const {
+    FaoAuditPanel,
+    buildAmpcError,
+    buildForecastChartData,
+    describeFaoStressStatus,
+  } = forecastModule;
 
   assert.deepEqual(Object.keys(FAO_SOIL_PRESETS), ["sand", "light_loam", "loam", "clay_loam"]);
   assert.deepEqual(
@@ -153,8 +160,106 @@ try {
   assert.ok(markup.includes('data-testid="auto-settings-crop-kc"'), "AutoSettingsForm must render crop_kc from profile");
   assert.ok(markup.includes('value="1"'), "AutoSettingsForm must render API response numeric values");
   assert.ok(markup.includes('role="alert"'), "AutoSettingsForm must render API validation errors as alerts");
+
+  const sampleRecommendation = {
+    id: 101,
+    sensor_data: 201,
+    estimation: 301,
+    device_command: null,
+    mode: "AUTO",
+    pump_seconds: 45,
+    step_seconds: 300,
+    predicted_soil_moisture: [62, 61.5, 61],
+    target_band: { low: 55, high: 65 },
+    objective_cost: 1.25,
+    safety_status: "safe",
+    reason: "ok",
+    bias_correction: 0,
+    bias_window_count: 0,
+    used_today_pump_seconds: 45,
+    command_created: false,
+    actuator_status: "disabled",
+    created_at: "2026-05-12T00:00:00Z",
+  };
+
+  assert.equal(describeFaoStressStatus({ initial_dr: 0, raw: 25 }).tone, "wet");
+  assert.equal(describeFaoStressStatus({ initial_dr: 12, raw: 25 }).tone, "safe");
+  assert.equal(describeFaoStressStatus({ initial_dr: 30, raw: 25 }).tone, "stress");
+
+  const recommendationWithAudit = {
+    ...sampleRecommendation,
+    state_snapshot: {
+      fao56: {
+        initial_theta: 0.315,
+        initial_dr: 1.5,
+        taw: 51,
+        raw: 25.5,
+        ks: 1,
+        et0_step: 0.05,
+        etc_adj: 0.05,
+        irrigation_depth_mm: 19.2,
+        predicted_dr: [1.5, 0],
+        predicted_soil_moisture: [62, 64],
+      },
+    },
+  };
+  const faoMarkup = renderToStaticMarkup(
+    React.createElement(FaoAuditPanel, { recommendation: recommendationWithAudit }),
+  );
+
+  assert.ok(faoMarkup.includes('data-testid="fao-audit-panel"'), "FAO audit panel must render");
+  assert.ok(faoMarkup.includes('data-testid="fao-stress-status"'), "FAO panel must render stress status");
+  assert.ok(faoMarkup.includes("Safe zone"), "FAO panel must classify Dr <= RAW as safe");
+  assert.ok(faoMarkup.includes("Dr"), "FAO panel must render Dr diagnostic");
+  assert.ok(faoMarkup.includes("TAW"), "FAO panel must render TAW diagnostic");
+  assert.ok(faoMarkup.includes("RAW"), "FAO panel must render RAW diagnostic");
+  assert.ok(faoMarkup.includes("Ks"), "FAO panel must render Ks diagnostic");
+  assert.ok(faoMarkup.includes("ET0_step"), "FAO panel must render ET0_step diagnostic");
+  assert.ok(faoMarkup.includes("ETc_adj"), "FAO panel must render ETc_adj diagnostic");
+  assert.ok(
+    faoMarkup.includes("irrigation_depth_mm"),
+    "FAO panel must render irrigation_depth_mm diagnostic",
+  );
+  assert.ok(faoMarkup.includes("1.50 mm"), "FAO panel must format FAO millimeter values");
+
+  const noAuditMarkup = renderToStaticMarkup(
+    React.createElement(FaoAuditPanel, { recommendation: sampleRecommendation }),
+  );
+  assert.ok(noAuditMarkup.includes('data-testid="fao-audit-panel"'), "FAO panel must render without audit data");
+  assert.ok(noAuditMarkup.includes("--"), "FAO panel must use null-safe placeholders without audit data");
+
+  const forecastRows = buildForecastChartData({
+    latest: {
+      id: 1,
+      temperature: 30,
+      humidity: 70,
+      light: 450,
+      soil_moisture: 60,
+      recorded_at: "2026-05-12T00:00:00Z",
+    },
+    estimation: null,
+    recommendation: recommendationWithAudit,
+    scheduler: null,
+    history: [],
+  });
+  assert.deepEqual(
+    forecastRows.filter((row) => row.soilForecast !== null).map((row) => row.soilForecast),
+    [62, 61.5, 61],
+    "forecast chart must keep using recommendation.predicted_soil_moisture percent values",
+  );
+
+  const ampcError = buildAmpcError(
+    {
+      ...sampleRecommendation,
+      safety_status: "config_error",
+      reason: 'ValueError: root_depth_m must be > 0\nFile "api/ampc.py", line 134',
+    },
+    null,
+  );
+  assert.ok(!ampcError.includes("ValueError"), "AMPC error UI must not leak exception names");
+  assert.ok(!ampcError.includes("api/ampc.py"), "AMPC error UI must not leak backend file paths");
 } finally {
   await vite.close();
 }
 
-console.log(`frontend smoke tests passed (${requiredPaths.length} API paths, executable FAO settings checks)`);
+console.log(`frontend smoke tests passed (${requiredPaths.length} API paths, FAO settings and forecast audit checks)`);

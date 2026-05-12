@@ -90,6 +90,18 @@ Soil presets in the frontend match the accepted backend/MPC contract:
 
 Selecting a soil preset fills the theta fields on the client, but users can still edit those physical values before saving. The UI labels keep sensor-percent thresholds separate from volumetric `theta` values.
 
+## Frontend Forecast Contract
+
+`Green-House/frontend/src/app/components/ForecastPage.tsx` keeps the forecast chart on `AMPCRecommendation.predicted_soil_moisture`, which is still sensor percent for dashboard compatibility.
+
+The same page renders `AMPCRecommendation.state_snapshot.fao56` as optional diagnostics. It shows `Dr`, `TAW`, `RAW`, `Ks`, `ET0_step`, `ETc_adj`, and `irrigation_depth_mm` without converting those values into sensor percent. It classifies the current FAO state as:
+
+- wet/no-irrigation when `Dr = 0`
+- safe zone when `Dr <= RAW`
+- water stress when `Dr > RAW`
+
+Older recommendation responses that do not have `state_snapshot.fao56` still render the percent chart and show null-safe placeholders in the audit panel. Frontend error text normalizes backend reasons and does not display raw stack traces or file paths.
+
 ## Implementation Files
 
 - `Green-House/backend/api/estimation.py`: SensorData -> `api_estimationcycle`
@@ -97,6 +109,7 @@ Selecting a soil preset fills the theta fields on the client, but users can stil
 - `Green-House/backend/api/views.py`: REST endpoints
 - `Green-House/backend/api/models.py`: greenhouse, config, estimation, recommendation models
 - `Green-House/frontend/src/app/components/AutoSettings.tsx`: FAO profile controls and legacy dashboard settings
+- `Green-House/frontend/src/app/components/ForecastPage.tsx`: percent forecast chart and FAO audit diagnostics
 - `MPC/mpc/solver/`: grid shooting solver
 - `MPC/mpc/plant/arx.py`: ARX plant model
 - `MPC/mpc/config.py`: controller config and cost weights
