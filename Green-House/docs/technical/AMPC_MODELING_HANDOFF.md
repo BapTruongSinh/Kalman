@@ -39,6 +39,8 @@ Fail closed means:
 - no dangerous actuator command is queued
 - audit row is still saved for dashboard/debugging
 
+The final FAO-56 integration gate also applies migrations before checking runtime readiness. A local database with unapplied `api.0010_add_fao56_control_profile_config` is not ready for FAO AMPC until `python manage.py migrate` has been run.
+
 ## Ownership Contract
 
 All production AMPC API routes are greenhouse-scoped:
@@ -101,6 +103,40 @@ The same page renders `AMPCRecommendation.state_snapshot.fao56` as optional diag
 - water stress when `Dr > RAW`
 
 Older recommendation responses that do not have `state_snapshot.fao56` still render the percent chart and show null-safe placeholders in the audit panel. Frontend error text normalizes backend reasons and does not display raw stack traces or file paths.
+
+## Final Validation Contract
+
+Task `006-fao-integration-gates-docs` verifies these scenarios before acceptance:
+
+- wet state produces `Dr = 0` and pump `0`
+- dry/stressed state has `Dr > RAW` and recommends non-zero pump when safe
+- Open-Meteo ET0 unavailable fails closed and queues no command
+- invalid persisted FAO config writes a `config_error` audit before ET0/solver
+- greenhouse-scoped APIs reject another user's greenhouse
+- actuator command is queued only when mode is `AUTO`, actuator is enabled, a pump device exists, and recommendation safety is `safe`
+
+The active gate commands are:
+
+```powershell
+cd Green-House\backend
+python manage.py test api
+python manage.py check
+python manage.py makemigrations --check --dry-run
+python manage.py migrate --check
+python -m pip install -r requirements-local.txt --dry-run
+```
+
+```powershell
+cd Green-House\frontend
+npm test
+npm run build
+```
+
+```powershell
+python -m pytest Kalman\tests -q
+python -m pytest MPC\tests -q
+python -m compileall -q Kalman\kalman MPC\mpc Green-House\backend\api Green-House\backend\config
+```
 
 ## Implementation Files
 

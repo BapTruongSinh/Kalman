@@ -194,6 +194,26 @@ Dr_raw_next = Dr_k + ETc_adj_k - I_k(u_k)
 Dr_next = clamp(Dr_raw_next, 0, TAW)
 ```
 
+## 4.2 Green-House Runtime Mapping
+
+Green-House runtime không đọc trực tiếp JSON config của CLI. Django lưu cấu hình theo từng `GreenhouseControlProfile`, sau đó `Green-House/backend/api/ampc.py::profile_to_config()` dựng `ControllerConfig` cho MPC.
+
+| Green-House field | MPC config field |
+|-------------------|------------------|
+| `crop_kc` | `fao56.crop_kc` |
+| `soil_type` | `fao56.soil_type` |
+| `theta_fc` / `theta_wp` / `theta_sat` | `fao56.theta_fc/wp/sat` |
+| `root_depth_m` | `fao56.root_depth_m` |
+| `depletion_fraction_p` | `fao56.depletion_fraction_p` |
+| Open-Meteo ET0 service output | `fao56.et0_hour_mm` |
+| `pump_efficiency` / `pump_flow_lps` / `irrigation_area_m2` | `fao56.pump_efficiency/flow/area` |
+| `target_low` / `target_high` | `target_band.low/high` |
+| `cost_*` fields | `cost.*` weights |
+| `safety_stale_after_seconds` / `soft_daily_pump_cap_seconds` | `safety.*` |
+| `adaptive_*` fields | `adaptive.*` |
+
+Nếu persisted profile trong DB không hợp lệ, Green-House không gọi ET0 hoặc solver. Runtime tạo audit `AMPCRecommendation` fail-closed với `safety_status="config_error"` và `pump_seconds=0`.
+
 ## 5. Public Dataclasses
 
 | Dataclass | Module | Purpose |

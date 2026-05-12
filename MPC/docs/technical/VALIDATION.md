@@ -118,6 +118,40 @@ Expected stdout:
 - Actuator HTTP failure phải trả command fail-closed và alert.
 - V2 không gọi Django, database, HTTP actuator, hoặc phần cứng thật.
 
+## Green-House Integration Gates
+
+Sau khi tích hợp FAO-56 vào `Green-House/`, chạy thêm từ repo root hoặc thư mục con tương ứng:
+
+```powershell
+cd Green-House\backend
+python manage.py test api
+python manage.py check
+python manage.py makemigrations --check --dry-run
+python manage.py migrate --check
+python -m pip install -r requirements-local.txt --dry-run
+```
+
+```powershell
+cd Green-House\frontend
+npm test
+npm run build
+```
+
+```powershell
+python -m pytest Kalman\tests -q
+python -m pytest MPC\tests -q
+python -m compileall -q Kalman\kalman MPC\mpc Green-House\backend\api Green-House\backend\config
+```
+
+Integration scenarios cần có coverage:
+
+- Wet state tạo `Dr = 0` và không tưới thêm.
+- Dry/stressed state có `Dr > RAW` và đề xuất pump non-zero khi an toàn.
+- ET0 unavailable tạo recommendation fail-closed, pump `0`, không queue actuator command.
+- Persisted FAO config invalid tạo audit `config_error` trước khi gọi ET0/solver.
+- User không đọc/sửa/chạy greenhouse của user khác.
+- Actuator command chỉ được tạo khi control mode `AUTO`, profile bật actuator, có pump device, và recommendation `safe`.
+
 ## Regression Gate Cho Simulation
 
 Simulation regression dùng fixture synthetic ổn định, không dùng production data. Fixture phải bảo vệ các invariant:

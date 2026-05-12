@@ -51,6 +51,13 @@ Rules:
 }
 ```
 
+Green-House lưu contract này trong `api_ampcrecommendation`:
+
+- Các field tương thích dashboard như `pump_seconds`, `step_seconds`, `predicted_soil_moisture`, `target_band`, `safety_status`, và `reason` nằm ở top-level response.
+- Audit FAO-56 từ `fao56` được lưu dưới `state_snapshot.fao56`.
+- Audit ET0 từ Open-Meteo hoặc cache được lưu dưới `state_snapshot.et0`.
+- `predicted_soil_moisture` vẫn là sensor percent; `state_snapshot.fao56.predicted_dr` là chuỗi `Dr` vật lý để debug/control audit.
+
 Allowed `safety_status` values:
 
 - `safe`
