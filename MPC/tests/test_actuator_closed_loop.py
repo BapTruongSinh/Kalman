@@ -204,7 +204,7 @@ def _config(url: str) -> ControllerConfig:
 def _state(timestamp: datetime) -> ControllerState:
     return ControllerState(
         timestamp=timestamp,
-        kf_x_posterior=54.0,
+        kf_x_posterior=0.0,
         temperature=27.0,
         humidity=72.0,
         light=300.0,
@@ -216,7 +216,7 @@ def _state(timestamp: datetime) -> ControllerState:
 def _history() -> tuple[PlantRecord, ...]:
     return (
         PlantRecord(
-            soil_moisture=54.0,
+            soil_moisture=0.0,
             temperature=27.0,
             humidity=72.0,
             light=300.0,

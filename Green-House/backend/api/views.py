@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import timedelta
 
 from django.conf import settings
+from django.db import DatabaseError, connection
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from rest_framework import generics, permissions, status
@@ -12,6 +13,7 @@ from rest_framework.views import APIView
 from rest_framework_simplejwt.views import TokenObtainPairView
 
 from .models import (
+    AMPCRecommendation,
     Alert,
     ControlState,
     Device,
@@ -88,6 +90,17 @@ def _legacy_auto_settings_payload(profile):
     return {
         'crop_name': profile.crop_name,
         'crop_kc': profile.crop_kc,
+        'latitude': profile.latitude,
+        'longitude': profile.longitude,
+        'soil_type': profile.soil_type,
+        'theta_fc': profile.theta_fc,
+        'theta_wp': profile.theta_wp,
+        'theta_sat': profile.theta_sat,
+        'root_depth_m': profile.root_depth_m,
+        'depletion_fraction_p': profile.depletion_fraction_p,
+        'pump_efficiency': profile.pump_efficiency,
+        'pump_flow_lps': profile.pump_flow_lps,
+        'irrigation_area_m2': profile.irrigation_area_m2,
         'target_low': profile.target_low,
         'target_high': profile.target_high,
         'step_seconds': profile.step_seconds,
@@ -122,6 +135,17 @@ def _legacy_auto_settings_patch(data) -> dict:
     allowed = {
         'crop_name',
         'crop_kc',
+        'latitude',
+        'longitude',
+        'soil_type',
+        'theta_fc',
+        'theta_wp',
+        'theta_sat',
+        'root_depth_m',
+        'depletion_fraction_p',
+        'pump_efficiency',
+        'pump_flow_lps',
+        'irrigation_area_m2',
         'target_low',
         'target_high',
         'step_seconds',
@@ -425,6 +449,128 @@ class RunMetricsView(APIView):
         if summary is None:
             return Response({'detail': 'metrics_not_found'}, status=status.HTTP_404_NOT_FOUND)
         return Response(EvaluationSummarySerializer(summary).data)
+
+
+class KalmanTestSeriesView(APIView):
+    def get(self, request):
+        if not settings.DEBUG and not request.user.is_staff:
+            raise PermissionDenied('kalman_test_series_staff_only')
+
+        limit = min(max(int(request.query_params.get('limit', '100000')), 1), 100000)
+        database_name = getattr(settings, 'KALMAN_TEST_DB_NAME', 'kalman_greenhouse')
+        table_name = 'pipeline_cycles'
+        quoted_database = database_name.replace('`', '``')
+
+        query = f"""
+            SELECT
+                id,
+                greenhouse_id,
+                run_id,
+                sample_ts,
+                cycle_index,
+                slice_type,
+                source_type,
+                raw_soil_moisture,
+                raw_temperature,
+                raw_humidity,
+                raw_light,
+                raw_drip,
+                raw_mist,
+                raw_fan,
+                preprocess_status,
+                arx_predicted,
+                kf_x_prior,
+                kf_P_prior,
+                kf_innovation,
+                kf_R,
+                kf_K,
+                kf_x_posterior,
+                kf_P_posterior,
+                cycle_status,
+                error_message,
+                adaptive_status,
+                latency_ms
+            FROM (
+                SELECT *
+                FROM `{quoted_database}`.`{table_name}`
+                WHERE raw_soil_moisture IS NOT NULL
+                  AND kf_x_posterior IS NOT NULL
+                ORDER BY sample_ts DESC, id DESC
+                LIMIT %s
+            ) recent
+            ORDER BY sample_ts ASC, id ASC
+        """
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(query, [limit])
+                columns = [column[0] for column in cursor.description]
+                rows = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        except DatabaseError as exc:
+            return Response(
+                {
+                    'detail': 'kalman_test_source_unavailable',
+                    'source_database': database_name,
+                    'source_table': table_name,
+                    'error': str(exc),
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response({
+            'source_database': database_name,
+            'source_table': table_name,
+            'limit': limit,
+            'total_selected': len(rows),
+            'points': rows,
+        })
+
+
+class MPCTestSeriesView(APIView):
+    def get(self, request):
+        greenhouse = default_greenhouse(request.user)
+        limit = min(max(int(request.query_params.get('limit', '5000')), 1), 100000)
+        queryset = (
+            AMPCRecommendation.objects
+            .filter(
+                greenhouse=greenhouse,
+                config_snapshot__mpc_test_source='manual_mpc_test_seed',
+            )
+            .select_related('sensor_data')
+            .order_by('created_at', 'id')[:limit]
+        )
+
+        rows = list(queryset)
+        points = []
+        for audit in rows:
+            state = audit.state_snapshot or {}
+            sensor = audit.sensor_data
+            sample_ts = (
+                state.get('sample_ts')
+                or (sensor.recorded_at.isoformat() if sensor else None)
+                or audit.created_at.isoformat()
+            )
+            actual = state.get('actual_soil_moisture')
+            if actual is None and sensor is not None and sensor.soil_moisture is not None:
+                actual = float(sensor.soil_moisture)
+            points.append({
+                'timestamp': sample_ts,
+                'actual_soil_moisture': actual,
+                'mpc_soil_moisture': state.get('mpc_soil_moisture'),
+                'rule_based_soil_moisture': state.get('rule_based_soil_moisture'),
+                'mpc_pump_seconds': audit.pump_seconds,
+                'rule_based_pump_seconds': state.get('rule_based_pump_seconds'),
+                'target_low': audit.target_band.get('low', 55.0),
+                'target_high': audit.target_band.get('high', 65.0),
+                'safety_status': audit.safety_status,
+                'reason': audit.reason,
+            })
+
+        return Response({
+            'greenhouse_id': greenhouse.id,
+            'source_table': 'ampc_recommendations',
+            'total_selected': len(points),
+            'points': points,
+        })
 
 
 class GreenhouseControlProfileView(APIView):

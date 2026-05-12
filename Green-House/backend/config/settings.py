@@ -122,6 +122,7 @@ KALMAN_LIVE_R_MIN = float(os.getenv('KALMAN_LIVE_R_MIN', '0.25'))
 KALMAN_LIVE_R_MAX = float(os.getenv('KALMAN_LIVE_R_MAX', '4.0'))
 KALMAN_LIVE_ALPHA = float(os.getenv('KALMAN_LIVE_ALPHA', '0.5'))
 AMPC_RAW_FALLBACK_DELTA = float(os.getenv('AMPC_RAW_FALLBACK_DELTA', '8.0'))
+KALMAN_TEST_DB_NAME = os.getenv('KALMAN_TEST_DB_NAME', 'kalman_greenhouse')
 
 # Dev-friendly channel layer. Sau này scale nhiều process thì đổi sang Redis.
 CHANNEL_LAYERS = {

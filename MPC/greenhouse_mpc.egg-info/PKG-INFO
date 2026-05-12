@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: greenhouse-mpc
+Version: 0.1.0
+Summary: Standalone MPC/AMPC controller for the smart greenhouse demo
+Requires-Python: >=3.10

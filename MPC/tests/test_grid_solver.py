@@ -116,7 +116,7 @@ def test_grid_solver_in_band_prefers_no_pump() -> None:
     assert recommendation.safety_status == "safe"
     assert recommendation.pump_seconds == 0.0
     assert recommendation.step_seconds == 300
-    assert recommendation.reason == "in_target_band"
+    assert recommendation.reason == "field_capacity_or_wetter"
     assert set(recommendation.to_dict()) == {
         "pump_seconds",
         "step_seconds",
@@ -125,32 +125,37 @@ def test_grid_solver_in_band_prefers_no_pump() -> None:
         "cost",
         "safety_status",
         "reason",
+        "fao56",
     }
+    assert recommendation.fao56 is not None
+    assert recommendation.fao56["initial_dr"] == pytest.approx(0.0)
 
 
 def test_grid_solver_below_band_recommends_pump() -> None:
     recommendation = GridShootingSolver().recommend(
-        state=_state(50.0),
-        history=_history(50.0),
+        state=_state(0.0),
+        history=_history(0.0),
         plant_model=LinearPlant(gain_per_full_pump=2.0),
         now=NOW,
     )
 
     assert recommendation.safety_status == "safe"
     assert 0.0 < recommendation.pump_seconds <= 300.0
-    assert recommendation.reason == "below_target_margin"
+    assert recommendation.reason == "above_raw_stress"
+    assert recommendation.fao56 is not None
+    assert recommendation.fao56["initial_dr"] > recommendation.fao56["raw"]
 
 
 def test_grid_solver_uses_state_as_latest_forecast_record() -> None:
     recommendation = GridShootingSolver().recommend(
-        state=_state(40.0),
+        state=_state(0.0),
         history=_history(60.0),
         plant_model=LinearPlant(gain_per_full_pump=2.0),
         now=NOW,
     )
 
     assert recommendation.safety_status == "safe"
-    assert recommendation.reason == "below_target_margin"
+    assert recommendation.reason == "above_raw_stress"
     assert recommendation.pump_seconds > 0.0
 
 
@@ -164,7 +169,7 @@ def test_grid_solver_above_band_recommends_no_pump() -> None:
 
     assert recommendation.safety_status == "safe"
     assert recommendation.pump_seconds == 0.0
-    assert recommendation.reason == "above_target_margin"
+    assert recommendation.reason == "field_capacity_or_wetter"
 
 
 def test_grid_solver_respects_pump_bounds() -> None:

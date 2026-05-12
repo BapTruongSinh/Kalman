@@ -4,6 +4,7 @@ from .adaptive import BiasState
 from .actuator import ActuatorCommand, ActuatorResult
 from .closed_loop import ClosedLoopResult, run_closed_loop
 from .config import ActuatorConfig, AdaptiveConfig, ControllerConfig, PumpLimits
+from .fao56 import Fao56Config, Fao56State, Fao56Step
 from .schema import default_config_schema
 from .state import ControllerState, DisturbanceForecast, PlantRecord
 from .simulation import SimulationReport
@@ -19,6 +20,9 @@ __all__ = [
     "ControllerConfig",
     "ControllerState",
     "DisturbanceForecast",
+    "Fao56Config",
+    "Fao56State",
+    "Fao56Step",
     "PlantRecord",
     "PumpLimits",
     "Recommendation",

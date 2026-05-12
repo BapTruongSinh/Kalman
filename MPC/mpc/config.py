@@ -9,6 +9,8 @@ from math import isfinite
 from pathlib import Path
 from typing import Any, Mapping
 
+from .fao56 import Fao56Config, fao56_config_from_mapping
+
 
 def _require_finite(name: str, value: float) -> None:
     if not isfinite(value):
@@ -174,6 +176,7 @@ class ControllerConfig:
     pump: PumpLimits = field(default_factory=PumpLimits)
     cost: CostWeights = field(default_factory=CostWeights)
     safety: SafetyConfig = field(default_factory=SafetyConfig)
+    fao56: Fao56Config = field(default_factory=Fao56Config)
     adaptive: AdaptiveConfig = field(default_factory=AdaptiveConfig)
     actuator: ActuatorConfig = field(default_factory=ActuatorConfig)
 
@@ -191,6 +194,7 @@ def controller_config_from_mapping(
     pump_raw = _mapping_or_empty(payload.get("pump"), "pump")
     cost_raw = _mapping_or_empty(payload.get("cost"), "cost")
     safety_raw = _mapping_or_empty(payload.get("safety"), "safety")
+    fao56_raw = _mapping_or_empty(payload.get("fao56"), "fao56")
     adaptive_raw = _mapping_or_empty(payload.get("adaptive"), "adaptive")
     actuator_raw = _mapping_or_empty(payload.get("actuator"), "actuator")
 
@@ -235,6 +239,7 @@ def controller_config_from_mapping(
                 safety_raw.get("fail_closed_pump_seconds", 0.0)
             ),
         ),
+        fao56=fao56_config_from_mapping(fao56_raw),
         adaptive=AdaptiveConfig(
             enabled=_strict_bool(
                 adaptive_raw.get("enabled", False),

@@ -19,7 +19,11 @@ from mpc.simulation.report import (
     cost_breakdown,
     utc_now,
 )
-from mpc.solver.cost import TrajectoryCost, band_error
+from mpc.solver.cost import (
+    TrajectoryCost,
+    band_error,
+    score_fao56_pump_sequence_with_daily_reset,
+)
 from mpc.solver.grid import GridShootingSolver
 from mpc.state import ControllerState, PlantRecord
 
@@ -57,6 +61,7 @@ class SimulationRow:
 
 @dataclass(frozen=True)
 class _RolloutResult:
+    initial_soil: float
     soils: tuple[float, ...]
     pumps: tuple[float, ...]
     dates: tuple[date, ...]
@@ -303,6 +308,7 @@ def _rollout_mpc(
         previous_pump = pump
 
     return _RolloutResult(
+        initial_soil=initial_soil,
         soils=tuple(soils),
         pumps=tuple(pumps),
         dates=tuple(dates),
@@ -399,6 +405,7 @@ def _rollout_adaptive_mpc(
         previous_pump = pump
 
     return _RolloutResult(
+        initial_soil=initial_soil,
         soils=tuple(soils),
         pumps=tuple(pumps),
         dates=tuple(dates),
@@ -452,6 +459,7 @@ def _rollout_threshold(
         previous_pump = pump
 
     return _RolloutResult(
+        initial_soil=initial_soil,
         soils=tuple(soils),
         pumps=tuple(pumps),
         dates=tuple(dates),
@@ -504,7 +512,7 @@ def _metrics(
         for value in result.soils
     ]
     cost = _score_with_daily_reset(
-        predictions=result.soils,
+        initial_sensor_percent=result.initial_soil,
         pump_seconds=result.pumps,
         dates=result.dates,
         previous_pump_seconds=previous_pump_seconds,
@@ -560,91 +568,19 @@ def _observation_errors(result: _RolloutResult) -> tuple[float, ...]:
 
 def _score_with_daily_reset(
     *,
-    predictions: Sequence[float],
+    initial_sensor_percent: float,
     pump_seconds: Sequence[float],
     dates: Sequence[date],
     previous_pump_seconds: float,
     config: ControllerConfig,
 ) -> TrajectoryCost:
-    if not (len(predictions) == len(pump_seconds) == len(dates)):
-        raise ValueError("predictions, pump sequence, and dates must align")
-    if not predictions:
-        raise ValueError("trajectory must not be empty")
-    if not isfinite(previous_pump_seconds):
-        raise ValueError("previous_pump_seconds must be finite")
-
-    band_total = 0.0
-    water_total = 0.0
-    switching_total = 0.0
-    previous_pump = previous_pump_seconds
-    daily_usage: dict[date, float] = {}
-    max_pump_seconds = config.pump.max_seconds
-    daily_cap_seconds = config.safety.soft_daily_pump_cap_seconds
-    if max_pump_seconds <= 0.0:
-        raise ValueError("pump.max_seconds must be > 0")
-    if daily_cap_seconds <= 0.0:
-        raise ValueError("soft daily cap must be > 0")
-
-    for value, pump, day in zip(predictions, pump_seconds, dates):
-        if not isfinite(value):
-            raise ValueError("predicted soil moisture must be finite")
-        if not isfinite(pump):
-            raise ValueError("pump_seconds must be finite")
-        if pump < 0.0:
-            raise ValueError("pump_seconds must be >= 0")
-
-        error = band_error(
-            value,
-            low=config.target_band.low,
-            high=config.target_band.high,
-        )
-        pump_ratio = pump / max_pump_seconds
-        switch_ratio = abs(pump - previous_pump) / max_pump_seconds
-        cumulative_today = daily_usage.get(day, 0.0) + pump
-        daily_usage[day] = cumulative_today
-
-        band_total += config.cost.band_violation * error * error
-        water_total += config.cost.water_use * pump_ratio * pump_ratio
-        switching_total += config.cost.switching * switch_ratio * switch_ratio
-        previous_pump = pump
-
-    daily_cap_total = 0.0
-    for cumulative_today in daily_usage.values():
-        daily_excess_ratio = max(
-            0.0,
-            cumulative_today - daily_cap_seconds,
-        ) / daily_cap_seconds
-        daily_cap_total += (
-            config.cost.daily_cap_excess
-            * daily_excess_ratio
-            * daily_excess_ratio
-        )
-
-    terminal_error = band_error(
-        predictions[-1],
-        low=config.target_band.low,
-        high=config.target_band.high,
-    )
-    terminal_total = (
-        config.cost.terminal_band_violation
-        * terminal_error
-        * terminal_error
-    )
-    total = (
-        band_total
-        + water_total
-        + switching_total
-        + daily_cap_total
-        + terminal_total
-    )
-    return TrajectoryCost(
-        total=total,
-        band=band_total,
-        terminal=terminal_total,
-        water=water_total,
-        switching=switching_total,
-        daily_cap=daily_cap_total,
-    )
+    return score_fao56_pump_sequence_with_daily_reset(
+        initial_sensor_percent=initial_sensor_percent,
+        pump_seconds=pump_seconds,
+        dates=dates,
+        previous_pump_seconds=previous_pump_seconds,
+        config=config,
+    ).cost
 
 
 def _row_from_mapping(row: dict[str, str]) -> SimulationRow:

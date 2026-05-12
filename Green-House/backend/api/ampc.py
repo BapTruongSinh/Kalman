@@ -18,11 +18,13 @@ from mpc.config import (
     SafetyConfig,
     TargetBand,
 )
+from mpc.fao56 import Fao56Config
 from mpc.plant import ARXPlantModel
 from mpc.solver import GridShootingSolver
 from mpc.state import MAX_TRUSTED_KALMAN_R, ControllerState, PlantRecord
 from mpc.types import Recommendation
 
+from .et0 import ET0Failure, ET0Reading, get_hourly_et0
 from .estimation import ensure_estimation_for_reading, latest_estimation
 from .models import (
     AMPCRecommendation,
@@ -104,7 +106,11 @@ def _profile_value(profile, greenhouse_name: str, legacy_name: str):
     return getattr(profile, legacy_name)
 
 
-def profile_to_config(profile: ControlProfile | GreenhouseControlProfile) -> ControllerConfig:
+def profile_to_config(
+    profile: ControlProfile | GreenhouseControlProfile,
+    *,
+    et0_hour_mm: float | None = None,
+) -> ControllerConfig:
     return ControllerConfig(
         step_seconds=profile.step_seconds,
         horizon_steps=profile.horizon_steps,
@@ -125,6 +131,19 @@ def profile_to_config(profile: ControlProfile | GreenhouseControlProfile) -> Con
             stale_after_seconds=_profile_value(profile, 'safety_stale_after_seconds', 'stale_after_seconds'),
             soft_daily_pump_cap_seconds=profile.soft_daily_pump_cap_seconds,
         ),
+        fao56=Fao56Config(
+            crop_kc=profile.crop_kc,
+            soil_type=getattr(profile, 'soil_type', 'loam'),
+            theta_fc=getattr(profile, 'theta_fc', 0.32),
+            theta_wp=getattr(profile, 'theta_wp', 0.15),
+            theta_sat=getattr(profile, 'theta_sat', 0.45),
+            root_depth_m=getattr(profile, 'root_depth_m', 0.30),
+            depletion_fraction_p=getattr(profile, 'depletion_fraction_p', 0.5),
+            et0_hour_mm=0.6 if et0_hour_mm is None else et0_hour_mm,
+            pump_efficiency=getattr(profile, 'pump_efficiency', 0.8),
+            pump_flow_lps=getattr(profile, 'pump_flow_lps', 0.02),
+            irrigation_area_m2=getattr(profile, 'irrigation_area_m2', 0.25),
+        ),
         adaptive=AdaptiveConfig(
             enabled=profile.adaptive_enabled,
             bias_window=profile.adaptive_bias_window,
@@ -138,6 +157,17 @@ def profile_snapshot(profile: ControlProfile | GreenhouseControlProfile) -> dict
         'greenhouse_id': getattr(profile, 'greenhouse_id', None),
         'crop_name': profile.crop_name,
         'crop_kc': profile.crop_kc,
+        'latitude': getattr(profile, 'latitude', None),
+        'longitude': getattr(profile, 'longitude', None),
+        'soil_type': getattr(profile, 'soil_type', None),
+        'theta_fc': getattr(profile, 'theta_fc', None),
+        'theta_wp': getattr(profile, 'theta_wp', None),
+        'theta_sat': getattr(profile, 'theta_sat', None),
+        'root_depth_m': getattr(profile, 'root_depth_m', None),
+        'depletion_fraction_p': getattr(profile, 'depletion_fraction_p', None),
+        'pump_efficiency': getattr(profile, 'pump_efficiency', None),
+        'pump_flow_lps': getattr(profile, 'pump_flow_lps', None),
+        'irrigation_area_m2': getattr(profile, 'irrigation_area_m2', None),
         'target_low': profile.target_low,
         'target_high': profile.target_high,
         'step_seconds': profile.step_seconds,
@@ -280,8 +310,14 @@ def _bias_state(profile: ControlProfile | GreenhouseControlProfile, now: datetim
     return BiasState(tuple(residuals), current_bias=bias, last_updated_at=now)
 
 
-def _state_snapshot(estimation: EstimationCycle, state: ControllerState) -> dict:
-    return {
+def _state_snapshot(
+    estimation: EstimationCycle,
+    state: ControllerState,
+    *,
+    recommendation: Recommendation | None = None,
+    et0_result: ET0Reading | ET0Failure | None = None,
+) -> dict:
+    snapshot = {
         'estimation_id': estimation.id,
         'run_id': estimation.run_id,
         'greenhouse_id': estimation.greenhouse_id,
@@ -296,6 +332,26 @@ def _state_snapshot(estimation: EstimationCycle, state: ControllerState) -> dict
         'light': state.light,
         'last_pump_seconds': state.last_pump_seconds,
     }
+    if recommendation is not None and recommendation.fao56 is not None:
+        snapshot['fao56'] = dict(recommendation.fao56)
+        snapshot['fao56']['predicted_soil_moisture'] = list(recommendation.predicted_soil_moisture)
+    if isinstance(et0_result, ET0Reading):
+        snapshot['et0'] = {
+            'requested_hour': et0_result.requested_hour.isoformat(),
+            'et0_hour_mm': et0_result.et0_hour_mm,
+            'et0_step_mm': et0_result.et0_step_mm,
+            'step_seconds': et0_result.step_seconds,
+            'source': et0_result.source,
+            'fetched_at': et0_result.fetched_at.isoformat(),
+        }
+    elif isinstance(et0_result, ET0Failure):
+        snapshot['et0'] = {
+            'requested_hour': et0_result.requested_hour.isoformat(),
+            'reason': et0_result.reason,
+            'detail': et0_result.detail,
+            'fail_closed': et0_result.fail_closed,
+        }
+    return snapshot
 
 
 def _fail_recommendation(config: ControllerConfig, safety_status: str, reason: str) -> Recommendation:
@@ -308,6 +364,39 @@ def _fail_recommendation(config: ControllerConfig, safety_status: str, reason: s
         safety_status=safety_status,
         reason=reason,
     )
+
+
+def _invalid_config_audit(
+    *,
+    profile: ControlProfile | GreenhouseControlProfile,
+    greenhouse: Greenhouse | None,
+    used_today: float,
+    reason: str,
+) -> AMPCRecommendation:
+    config = ControllerConfig()
+    recommendation = _fail_recommendation(config, 'config_error', reason)
+    audit = _persist_recommendation(
+        profile=profile,
+        config=config,
+        recommendation=recommendation,
+        estimation=None,
+        state=None,
+        bias=BiasState(),
+        used_today=used_today,
+        greenhouse=greenhouse,
+        sensor_data=None,
+        actuator_status=(
+            AMPCRecommendation.ActuatorStatus.UNSAFE_SKIPPED
+            if profile.actuator_enabled
+            else AMPCRecommendation.ActuatorStatus.DISABLED
+        ),
+    )
+    audit.state_snapshot = {
+        'fail_closed': True,
+        'config_error': reason,
+    }
+    audit.save(update_fields=['state_snapshot', 'updated_at'])
+    return audit
 
 
 def _persist_recommendation(
@@ -323,6 +412,7 @@ def _persist_recommendation(
     run: ExperimentRun | None = None,
     sensor_data: SensorData | None = None,
     actuator_status: str = AMPCRecommendation.ActuatorStatus.NOT_CALLED,
+    et0_result: ET0Reading | ET0Failure | None = None,
 ) -> AMPCRecommendation:
     control = _latest_control_state(greenhouse)
     return AMPCRecommendation.objects.create(
@@ -343,7 +433,16 @@ def _persist_recommendation(
         used_today_pump_seconds=used_today,
         actuator_status=actuator_status,
         config_snapshot=profile_snapshot(profile),
-        state_snapshot=_state_snapshot(estimation, state) if estimation and state else {},
+        state_snapshot=(
+            _state_snapshot(
+                estimation,
+                state,
+                recommendation=recommendation,
+                et0_result=et0_result,
+            )
+            if estimation and state
+            else {}
+        ),
     )
 
 
@@ -389,10 +488,19 @@ def run_auto_recommendation(
 ) -> AMPCRecommendation:
     greenhouse = get_greenhouse_for_user(user, greenhouse_id) if greenhouse_id is not None else default_greenhouse(user)
     profile = get_greenhouse_control_profile(greenhouse)
-    config = profile_to_config(profile)
     now = timezone.now()
     used_today = _used_today_pump_seconds(now, greenhouse)
     bias = BiasState()
+    et0_result: ET0Reading | ET0Failure | None = None
+    try:
+        config = profile_to_config(profile)
+    except ValueError as exc:
+        return _invalid_config_audit(
+            profile=profile,
+            greenhouse=greenhouse,
+            used_today=used_today,
+            reason=f'invalid_fao_config:{exc}',
+        )
 
     latest = latest_estimation(greenhouse=greenhouse)
     if latest is None:
@@ -433,6 +541,50 @@ def run_auto_recommendation(
         run_id=latest.run_id,
     )
 
+    et0_result = get_hourly_et0(
+        greenhouse,
+        now,
+        step_seconds=config.step_seconds,
+    )
+    if isinstance(et0_result, ET0Failure):
+        recommendation = _fail_recommendation(
+            config,
+            'pump_off_failsafe',
+            et0_result.reason,
+        )
+        audit = _persist_recommendation(
+            profile=profile,
+            config=config,
+            recommendation=recommendation,
+            estimation=latest,
+            state=state,
+            bias=bias,
+            used_today=used_today,
+            greenhouse=greenhouse,
+            run=latest.run,
+            sensor_data=sensor_data,
+            actuator_status=(
+                AMPCRecommendation.ActuatorStatus.DISABLED
+                if not profile.actuator_enabled
+                else AMPCRecommendation.ActuatorStatus.NOT_CALLED
+            ),
+            et0_result=et0_result,
+        )
+        control = _latest_control_state(greenhouse)
+        if create_command_if_auto and profile.actuator_enabled and control.mode == ControlState.Mode.AUTO:
+            return _queue_pump_command(audit)
+        return audit
+
+    try:
+        config = profile_to_config(profile, et0_hour_mm=et0_result.et0_hour_mm)
+    except ValueError as exc:
+        return _invalid_config_audit(
+            profile=profile,
+            greenhouse=greenhouse,
+            used_today=used_today,
+            reason=f'invalid_fao_config:{exc}',
+        )
+
     try:
         plant = ARXPlantModel.load_artifact(
             Path(settings.ARX_MODEL_PATH),
@@ -472,6 +624,7 @@ def run_auto_recommendation(
         run=latest.run,
         sensor_data=sensor_data,
         actuator_status=AMPCRecommendation.ActuatorStatus.DISABLED if not profile.actuator_enabled else AMPCRecommendation.ActuatorStatus.NOT_CALLED,
+        et0_result=et0_result,
     )
 
     control = _latest_control_state(greenhouse)

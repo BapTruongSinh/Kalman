@@ -27,9 +27,9 @@ Recommendation trả một lệnh bơm cho state hiện tại.
 python -m mpc recommend
 ```
 
-**Kết quả mong đợi**: file `reports\recommendation.json` có các field top-level `pump_seconds`, `step_seconds`, `predicted_soil_moisture`, `target_band`, `cost`, `safety_status`, và `reason`.
+**Kết quả mong đợi**: file `reports\recommendation.json` có các field top-level `pump_seconds`, `step_seconds`, `predicted_soil_moisture`, `target_band`, `cost`, `safety_status`, `reason`, và `fao56`.
 
-Khi không truyền `--history-json`, CLI tạo history tối thiểu từ state hiện tại đủ cho lag của ARX artifact.
+Khi không truyền `--history-json`, CLI tạo history tối thiểu từ state hiện tại đủ cho lag của ARX artifact. `predicted_soil_moisture` vẫn là percent để dashboard cũ hiển thị được; solver chọn lệnh theo FAO-56 `Dr/TAW/RAW` và ghi chi tiết trong `fao56`.
 
 ## Chạy V2 Simulation
 
@@ -43,10 +43,10 @@ python -m mpc simulate --max-steps 288
 
 Các metric chính:
 
-- `band_violation_seconds`: tổng thời gian độ ẩm đất nằm ngoài target band.
+- `band_violation_seconds`: tổng thời gian độ ẩm đất nằm ngoài target band; đây là metric sensor-percent legacy để so sánh dashboard, không phải objective điều khiển FAO.
 - `total_pump_seconds`: tổng số giây bơm.
 - `switching_count`: số lần lệnh bơm đổi giữa hai step liên tiếp.
-- `objective_cost`: tổng cost theo band, water, switching, soft daily cap, và terminal band.
+- `objective_cost`: tổng cost theo stress `Dr > RAW`, overwater, water, switching, soft daily cap, và terminal stress.
 - `mean_absolute_observation_error`: sai số trung bình tuyệt đối giữa forecast/controller state và observation trong fixture.
 
 ## Chạy V3 Adaptive Simulation

@@ -25,6 +25,8 @@ _None._
 
 ## Completed
 
+- [x] #012 - Switch MPC recommendation objective to FAO Dr/TAW/RAW control [area: backend] -> [.tasks/012-fao56-dr-objective-recommendation.md](.tasks/012-fao56-dr-objective-recommendation.md)
+- [x] #011 - Add FAO-56 water-balance model and config contracts [area: backend] -> [.tasks/011-fao56-water-balance-model.md](.tasks/011-fao56-water-balance-model.md)
 - [x] #010 - Simplify MPC CLI defaults and export config schema [area: backend] -> [.tasks/010-simplify-cli-defaults-config-schema.md](.tasks/010-simplify-cli-defaults-config-schema.md)
 - [x] #009 - Normalize MPC objective cost by pump bounds and daily cap [area: backend] -> [.tasks/009-normalize-mpc-objective-cost.md](.tasks/009-normalize-mpc-objective-cost.md)
 - [x] #008 - Document MPC/AMPC demo workflow and validation gates [area: docs] -> [.tasks/008-demo-workflow-validation-gates.md](.tasks/008-demo-workflow-validation-gates.md)

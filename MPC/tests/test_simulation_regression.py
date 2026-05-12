@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 
 import pytest
 
 from mpc.config import AdaptiveConfig, ControllerConfig, CostWeights, PumpLimits
 from mpc.plant import ARXPlantModel
+from mpc.solver.cost import score_fao56_pump_sequence_with_daily_reset
 from mpc.simulation import run_adaptive_simulation, run_simulation
 
 
@@ -36,10 +38,10 @@ def _below_band_csv(path: Path) -> Path:
     csv_path = path / "below_band_trace.csv"
     rows = [
         "Timestamp,Soil_Moisture,Temperature,Humidity,Light,Drip,Mist,Fan",
-        "2026-05-08 10:00:00,54.0,27.0,72.0,300.0,0.0,0.0,0.0",
-        "2026-05-08 10:05:00,54.0,27.0,72.0,300.0,0.0,0.0,0.0",
-        "2026-05-08 10:10:00,54.0,27.0,72.0,300.0,0.0,0.0,0.0",
-        "2026-05-08 10:15:00,54.0,27.0,72.0,300.0,0.0,0.0,0.0",
+        "2026-05-08 10:00:00,0.0,27.0,72.0,300.0,0.0,0.0,0.0",
+        "2026-05-08 10:05:00,0.0,27.0,72.0,300.0,0.0,0.0,0.0",
+        "2026-05-08 10:10:00,0.0,27.0,72.0,300.0,0.0,0.0,0.0",
+        "2026-05-08 10:15:00,0.0,27.0,72.0,300.0,0.0,0.0,0.0",
     ]
     csv_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
     return csv_path
@@ -59,7 +61,7 @@ def _positive_bias_csv(path: Path) -> Path:
     return csv_path
 
 
-def test_simulation_regression_mpc_uses_less_water_than_threshold(
+def test_simulation_regression_mpc_irrigates_dry_fao_profile(
     tmp_path: Path,
 ) -> None:
     model = ARXPlantModel.load_artifact(_artifact(tmp_path))
@@ -86,14 +88,25 @@ def test_simulation_regression_mpc_uses_less_water_than_threshold(
     threshold = payload["controllers"]["threshold"]
 
     assert payload["simulated_steps"] == 3
-    assert mpc["total_pump_seconds"] == pytest.approx(150.0)
-    assert threshold["total_pump_seconds"] == pytest.approx(300.0)
-    assert mpc["switching_count"] == 2
-    assert threshold["switching_count"] == 2
+    assert mpc["total_pump_seconds"] == pytest.approx(900.0)
+    assert threshold["total_pump_seconds"] == pytest.approx(900.0)
+    assert mpc["switching_count"] == 1
+    assert threshold["switching_count"] == 1
     assert mpc["band_violation_steps"] == threshold["band_violation_steps"]
-    assert mpc["cost_breakdown"]["water"] == pytest.approx(0.25)
-    assert threshold["cost_breakdown"]["water"] == pytest.approx(1.0)
-    assert mpc["objective_cost"] < threshold["objective_cost"]
+    assert mpc["cost_breakdown"]["water"] == pytest.approx(3.0)
+    expected_cost = score_fao56_pump_sequence_with_daily_reset(
+        initial_sensor_percent=0.0,
+        pump_seconds=(300.0, 300.0, 300.0),
+        dates=(date(2026, 5, 8), date(2026, 5, 8), date(2026, 5, 8)),
+        previous_pump_seconds=0.0,
+        config=config,
+    ).cost
+    assert mpc["objective_cost"] == pytest.approx(expected_cost.total)
+    assert mpc["cost_breakdown"]["band"] == pytest.approx(expected_cost.band)
+    assert mpc["cost_breakdown"]["overwater"] == pytest.approx(
+        expected_cost.overwater
+    )
+    assert mpc["objective_cost"] == pytest.approx(threshold["objective_cost"])
 
 
 def test_adaptive_simulation_reduces_observation_error_on_bias_mismatch(

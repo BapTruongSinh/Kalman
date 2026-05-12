@@ -36,7 +36,18 @@ Rules:
   "target_band": {"low": 55.0, "high": 65.0},
   "cost": 12.34,
   "safety_status": "safe",
-  "reason": "below_target_margin"
+  "reason": "above_raw_stress",
+  "fao56": {
+    "initial_theta": 0.315,
+    "initial_dr": 1.5,
+    "taw": 51.0,
+    "raw": 25.5,
+    "ks": 1.0,
+    "et0_step": 0.05,
+    "etc_adj": 0.05,
+    "irrigation_depth_mm": 19.2,
+    "predicted_dr": [0.0, 0.05, 0.1]
+  }
 }
 ```
 
@@ -73,6 +84,19 @@ Default config được định nghĩa ở [`CONFIG.md`](./CONFIG.md). Các fiel
     "stale_after_seconds": 600,
     "soft_daily_pump_cap_seconds": 1800.0,
     "fail_closed_pump_seconds": 0.0
+  },
+  "fao56": {
+    "crop_kc": 1.0,
+    "soil_type": "loam",
+    "theta_fc": 0.32,
+    "theta_wp": 0.15,
+    "theta_sat": 0.45,
+    "root_depth_m": 0.3,
+    "depletion_fraction_p": 0.5,
+    "et0_hour_mm": 0.6,
+    "pump_efficiency": 0.8,
+    "pump_flow_lps": 0.02,
+    "irrigation_area_m2": 0.25
   }
 }
 ```
@@ -115,7 +139,12 @@ Default runtime path nằm trong `mpc.schema.DEFAULT_RUNTIME_PATHS`: artifact `.
       {"name": "target_band.high", "type": "number"},
       {"name": "pump.max_seconds", "type": "number"},
       {"name": "safety.soft_daily_pump_cap_seconds", "type": "number"},
-      {"name": "crop.kc", "type": "number", "runtime_field": false}
+      {"name": "crop.kc", "type": "number", "runtime_field": false},
+      {"name": "fao56.crop_kc", "type": "number"},
+      {"name": "fao56.soil_type", "type": "enum"},
+      {"name": "fao56.root_depth_m", "type": "number"},
+      {"name": "fao56.et0_hour_mm", "type": "number"},
+      {"name": "fao56.pump_flow_lps", "type": "number"}
     ],
     "system_defaults": [
       {"name": "cost.water_use", "type": "number"},
@@ -128,7 +157,36 @@ Default runtime path nằm trong `mpc.schema.DEFAULT_RUNTIME_PATHS`: artifact `.
 
 `crop.kc` được xuất để website có chỗ lưu/hiển thị hệ số cây trồng, nhưng MPC runtime hiện chưa dùng trực tiếp field này. Token actuator thật không xuất hiện trong schema; schema chỉ cho phép cấu hình tên biến môi trường `actuator.bearer_token_env`.
 
-## 2.1.2 Objective Cost
+`theta_sat=0.45` is the first-version default wet-end mapping for the FAO-56 sensor scale. `crop.kc` is kept as a legacy schema alias; runtime water-balance code uses `fao56.crop_kc` and the other `fao56.*` fields.
+
+## 2.1.2 FAO-56 Objective
+
+The recommendation solver evaluates candidate pump sequences with root-zone depletion `Dr` as the primary control state. `predicted_soil_moisture` remains in sensor-percent units only for dashboard compatibility.
+
+Stage cost:
+
+```text
+stress_error = max(0, Dr_k - RAW)
+overwater_error = max(0, -Dr_raw_next)
+water_term = (u_k / pump_max_seconds)^2
+switch_term = ((u_k - u_k-1) / pump_max_seconds)^2
+```
+
+Weights map from the existing cost config:
+
+- `stress_error` and `overwater_error`: `cost.band_violation`
+- `water_term`: `cost.water_use`
+- `switch_term`: `cost.switching`
+
+Terminal cost:
+
+```text
+terminal_cost = cost.terminal_band_violation * max(0, Dr_H - RAW)^2
+```
+
+`Dr_raw_next` is checked before clamping so over-irrigation is penalized. The final transition still clamps with `Dr_next = clamp(Dr_raw_next, 0, TAW)`.
+
+## 2.1.3 Legacy Band Objective Reference
 
 Objective cost dùng band tracking theo độ lệch khỏi band. Water và switching normalize bằng `pump.max_seconds`; soft daily cap normalize bằng `soft_daily_pump_cap_seconds` theo tổng planned pump seconds trong horizon:
 
@@ -146,6 +204,10 @@ sum_i [
 `band_error_i = max(0, target_low - theta_i) + max(0, theta_i - target_high)`.
 
 ## 2.2 Simulation Report Output
+
+`objective_cost` and `cost_breakdown` use the FAO-56 `Dr/RAW`
+stress/overwater objective. `band_violation_*` remains a legacy
+sensor-percent diagnostic for comparing dashboard-visible trajectories.
 
 `python -m mpc simulate` ghi JSON report có dạng:
 
@@ -172,6 +234,7 @@ sum_i [
       "objective_cost": 0.0,
       "cost_breakdown": {
         "band": 0.0,
+        "overwater": 0.0,
         "terminal": 0.0,
         "water": 0.0,
         "switching": 0.0,
@@ -191,6 +254,7 @@ sum_i [
       "objective_cost": 0.0,
       "cost_breakdown": {
         "band": 0.0,
+        "overwater": 0.0,
         "terminal": 0.0,
         "water": 0.0,
         "switching": 0.0,
